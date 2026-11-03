@@ -11,7 +11,7 @@ from __future__ import annotations
 import sqlite3
 from datetime import datetime, timezone
 
-from .config import config_dir
+from . import config
 
 _SCHEMA = (
     "CREATE TABLE IF NOT EXISTS memories ("
@@ -23,7 +23,8 @@ _SCHEMA = (
 
 
 def _db_path():
-    return config_dir() / "memory.db"
+    # resolved through the config module so tests can redirect the directory
+    return config.config_dir() / "memory.db"
 
 
 def _connect() -> sqlite3.Connection:

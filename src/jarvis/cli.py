@@ -345,11 +345,13 @@ def main(argv: list[str] | None = None) -> int:
             "Usage: jarvis [--voice] [--live] [--dry-run] [--version]\n"
             "       jarvis watch [--interval N] [--monitor N] [--max-iterations N]\n"
             "       jarvis wake\n"
+            "       jarvis health\n"
             "  --voice     start with push-to-talk voice input (Mark II)\n"
             "  --live      start with live screen sharing (Mark III)\n"
             "  --dry-run   start in simulation mode (tools plan, never execute)\n"
             "  watch       ambient screen observation loop\n"
-            "  wake        hands-free voice mode: say 'Jarvis' + command"
+            "  wake        hands-free voice mode: say 'Jarvis' + command\n"
+            "  health      the Oracle: HR/HRV screening report"
         )
         return 0
     if argv and argv[0] == "watch":
@@ -361,6 +363,11 @@ def main(argv: list[str] | None = None) -> int:
         if cfg is None:
             cfg = run_wizard(console)
         _wake_session(cfg, console)
+        return 0
+    if argv and argv[0] == "health":
+        from . import health
+
+        console.print(Panel(health.risk_assessment(), title="THE ORACLE", border_style="cyan"))
         return 0
 
     dry_run = "--dry-run" in argv

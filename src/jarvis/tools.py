@@ -269,6 +269,7 @@ def default_registry(
     allow_shell: bool = True,
     dry_run: bool = False,
     allow_memory: bool = True,
+    allow_health: bool = True,
     allow_screen_control: bool = False,
 ) -> ToolRegistry:
     """Build the registry with every tool registered.
@@ -276,6 +277,8 @@ def default_registry(
     Opt-out / opt-in groups:
     - shell command execution (allow_shell=True by default, see shell_tool.py)
     - persistent memory tools (allow_memory=True by default, zero dependencies)
+    - health tools (allow_health=True by default - local HR/HRV screening,
+      see health.py)
     - screen control tools (allow_screen_control=False by default - the model's
       hands on the display; every action is confirm-gated; enable via the
       vision.screen_control config flag)
@@ -365,6 +368,10 @@ def default_registry(
         from .memory import register_memory_tools
 
         register_memory_tools(reg)
+    if allow_health:
+        from .health import register_health_tools
+
+        register_health_tools(reg)
     if allow_screen_control:
         from .screen_tools import register_screen_tools
 

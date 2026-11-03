@@ -1,3 +1,3 @@
 """J.A.R.V.I.S. - a personal AI assistant with a safe tool-execution backend."""
 
-__version__ = "1.4.0"
+__version__ = "1.5.0"

@@ -27,6 +27,7 @@ Works with a **cloud brain** (Z.AI GLM, OpenAI, Google Gemini, or any OpenAI-com
 | **Streaming** | Replies render token-by-token as they generate |
 | **Wake word** | `jarvis wake`: hands-free — say "Jarvis", speak a command, get a spoken answer (local Vosk detection) |
 | **Screen control** | Opt-in `screen_click` / `screen_type` / `screen_press` / `screen_scroll` — every action confirm-gated, pyautogui failsafe armed |
+| **Health (Mark V)** | The Oracle: HR/HRV samples from wearable CSV exports, screened against your own 30-day baseline with sigma-level risk bands — local, honest, not a diagnosis |
 
 ## Install
 
@@ -126,6 +127,23 @@ jarvis wake
 
 Say **"Jarvis"** — the local wake-word detector (Vosk streaming, no cloud) cues with *"wake word detected"*, captures your command until you pause, runs it through the full agent (tools included), and speaks the answer. Ctrl+C to stand down.
 
+## Health — the Oracle (Mark V)
+
+```bash
+jarvis health
+```
+
+Feed it heart-rate data from your wearable (CSV export from Garmin Connect, Oura, or any file with a timestamp + value column — or just say *"log my HRV at 48"*), and the Oracle screens it against **your own** rolling 30-day baseline:
+
+```
+HEALTH SIGNAL: ELEVATED - consider rest and hydration; watch for symptoms
+HRV: recent 35.0 vs 30-day baseline 51.2 (std 1.9, n=27) -> z=-2.68 [HIGH] suppressed
+Screening heuristic against your own baseline - not a medical diagnosis.
+```
+
+- Suppressed HRV and elevated resting HR are known statistical precursors of respiratory illness by roughly one to two days — so the signal can appear **before** you feel sick. That is a screening heuristic with sigma values attached, never a diagnosis or a certainty.
+- Data lives in `%APPDATA%\jarvis\health.db`, local only. In-chat: `health_log`, `health_import`, `health_check`, `health_trend`.
+
 
 
 ## Security model
@@ -178,6 +196,7 @@ src/jarvis/
 - [x] Persistent local memory ("second brain" search)
 - [x] Streaming responses
 - [x] Hands-free wake word
+- [x] Health: HR/HRV screening against your own baseline (the Oracle)
 - [ ] Multi-monitor vision, clipboard paste for non-ASCII typing, wake-word tuning UI
 
 ## License

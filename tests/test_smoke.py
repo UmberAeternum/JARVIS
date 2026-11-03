@@ -101,12 +101,12 @@ class FakeBrain:
 
 
 def version_string() -> None:
-    expect(__version__ == "1.4.0", __version__)
+    expect(__version__ == "1.5.0", __version__)
 
 
 def registry_built() -> None:
     reg = default_registry(confirm=lambda d: False)
-    expect(len(reg.schemas) == 12, f"expected 12 tools, got {len(reg.schemas)}")
+    expect(len(reg.schemas) == 16, f"expected 16 tools, got {len(reg.schemas)}")
 
 
 def allow_shell_false_drops_shell() -> None:
@@ -191,12 +191,115 @@ def wake_word_matcher() -> None:
     expect(not wake_hit(""), "empty partial must not trigger")
 
 
+def health_store_and_import(tmp: Path) -> None:
+    original = config.config_dir
+    config.config_dir = lambda: tmp / "cfghealth"
+    try:
+        from jarvis import health
+
+        health.add_sample(health.KIND_HRV, 50.0, "2026-10-01T22:00:00+00:00")
+        rows = health.samples_since(health.KIND_HRV, "2026-01-01T00:00:00+00:00")
+        expect(len(rows) == 1 and rows[0][0] == 50.0, "sample round-trip failed")
+
+        csv_path = tmp / "hrv.csv"
+        csv_path.write_text(
+            "timestamp,hrv\n"
+            "2026-10-02T22:00:00+00:00,52\n"
+            "2026-10-03T22:00:00+00:00,48\n"
+            "2026-10-04T22:00:00+00:00,51\n",
+            encoding="utf-8",
+        )
+        count = health.import_csv(str(csv_path), health.KIND_HRV)
+        expect(count == 3, f"imported {count}")
+        expect(
+            len(health.samples_since(health.KIND_HRV, "2026-01-01T00:00:00+00:00")) == 4,
+            "post-import total wrong",
+        )
+
+        headerless = tmp / "rhr.csv"
+        headerless.write_text(
+            "2026-10-02T07:00:00+00:00,58\n2026-10-03T07:00:00+00:00,57\n",
+            encoding="utf-8",
+        )
+        count = health.import_csv(str(headerless), health.KIND_RHR)
+        expect(count == 2, f"headerless import {count}")
+    finally:
+        config.config_dir = original
+
+
+def health_baseline_and_risk(tmp: Path) -> None:
+    from datetime import datetime, timedelta, timezone as tz
+
+    from jarvis import health
+
+    original = config.config_dir
+    config.config_dir = lambda: tmp / "cfgrisk"
+    try:
+        now = datetime.now(tz.utc)
+        for day in range(30, 3, -1):  # stable ~50 ms baseline
+            health.add_sample(
+                health.KIND_HRV, 50.0 + (day % 3),
+                (now - timedelta(days=day)).isoformat(timespec="seconds"),
+            )
+        health.add_sample(
+            health.KIND_HRV, 35.0,
+            (now - timedelta(hours=12)).isoformat(timespec="seconds"),
+        )
+        report = health.risk_assessment()
+        expect("ELEVATED" in report or "HIGH" in report, report)
+        expect("z=" in report, "sigma value missing")
+        expect("not a medical diagnosis" in report, "disclaimer missing")
+    finally:
+        config.config_dir = original
+
+    config.config_dir = lambda: tmp / "cfgrisk-ok"
+    try:
+        now = datetime.now(tz.utc)
+        for day in range(30, 0, -1):
+            health.add_sample(
+                health.KIND_HRV, 50.0,
+                (now - timedelta(days=day)).isoformat(timespec="seconds"),
+            )
+        health.add_sample(
+            health.KIND_HRV, 50.0,
+            (now - timedelta(hours=12)).isoformat(timespec="seconds"),
+        )
+        report = health.risk_assessment()
+        expect("BASELINE" in report, f"stable readings should read BASELINE: {report}")
+    finally:
+        config.config_dir = original
+
+
+def health_tools_dispatch(tmp: Path) -> None:
+    original = config.config_dir
+    config.config_dir = lambda: tmp / "cfgtools"
+    try:
+        from jarvis import health
+
+        expect(health.risk_band(-2.6, inverted=True) == "HIGH", "band HIGH")
+        expect(health.risk_band(-1.6, inverted=True) == "ELEVATED", "band ELEVATED")
+        expect(health.risk_band(0.5, inverted=False) == "BASELINE", "band BASELINE")
+
+        reg = default_registry(confirm=lambda d: False)
+        out = reg.dispatch("health_log", json.dumps({"hrv_ms": 55}))
+        expect(out.startswith("Logged"), out)
+        out = reg.dispatch("health_check", "{}")
+        expect("not a medical diagnosis" in out, out)
+        out = reg.dispatch("health_import", json.dumps({"path": "missing.csv", "kind": "hrv_ms"}))
+        expect(out.startswith("ERROR"), out)
+        out = reg.dispatch("health_trend", json.dumps({"days": 7}))
+        expect("No " in out or "daily averages" in out, out)
+    finally:
+        config.config_dir = original
+
+
 def system_prompt_content() -> None:
     from jarvis import system_prompt
 
     text = system_prompt.build()
     expect("J.A.R.V.I.S." in text and "TOOL CONTRACT" in text, "prompt missing sections")
     expect("PERSISTENT MEMORY" in text, "memory contract missing")
+    expect("HEALTH SIGNALS" in text, "health guidance missing")
 
 
 def denylist_flags() -> None:
@@ -651,6 +754,9 @@ def main() -> int:
         check("config vision round-trip (v4)", lambda: config_vision_roundtrip(tmp_path))
         check("memory tools round-trip", lambda: memory_tools_roundtrip(tmp_path))
         check("screen tools gated", lambda: screen_tools_gated(tmp_path))
+        check("health store + CSV import", lambda: health_store_and_import(tmp_path))
+        check("health baseline + risk bands", lambda: health_baseline_and_risk(tmp_path))
+        check("health tools dispatch", lambda: health_tools_dispatch(tmp_path))
 
     check("BrainChain failover", chain_failover)
     check("BrainChain non-transient raises", chain_non_transient_raises)
