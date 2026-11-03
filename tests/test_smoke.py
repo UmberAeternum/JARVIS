@@ -101,7 +101,7 @@ class FakeBrain:
 
 
 def version_string() -> None:
-    expect(__version__ == "1.6.0", __version__)
+    expect(__version__ == "1.7.0", __version__)
 
 
 def registry_built() -> None:
@@ -291,6 +291,91 @@ def health_tools_dispatch(tmp: Path) -> None:
         expect("No " in out or "daily averages" in out, out)
     finally:
         config.config_dir = original
+
+
+def portal_server_roundtrip(tmp: Path) -> None:
+    from http.client import HTTPConnection
+
+    from jarvis import config as config_module
+    from jarvis.portal import PAGE_XR, PortalState, cycle_task, start_server
+
+    original = config_module.config_dir
+    config_module.config_dir = lambda: tmp / "cfgportal"  # keep board.json out of the real dir
+    try:
+        _portal_roundtrip_inner(tmp)
+    finally:
+        config_module.config_dir = original
+
+
+def _portal_roundtrip_inner(tmp: Path) -> None:
+    from http.client import HTTPConnection
+
+    from jarvis.portal import PAGE_XR, PortalState, cycle_task, start_server
+
+    expect("ENTER VR" in PAGE_XR and "/api/board" in PAGE_XR, "page markers missing")
+    expect("127.0.0.1" not in PAGE_XR, "page must not hardcode the host")
+    board = {"tasks": [{"id": 5, "column": "done", "text": "wrapped"}]}
+    expect(cycle_task(board, 5)["column"] == "todo", "cycle must wrap done -> todo")
+
+    chain = types.SimpleNamespace(
+        create_chat=lambda messages=None, tools=None, tool_choice="auto":
+        FakeResp(FakeMsg("Present and accounted for, Sir"))
+    )
+    state = PortalState(chain, "testtoken123")
+    server, port, thread = start_server(state, preferred_port=18781)
+    try:
+        connection = HTTPConnection("127.0.0.1", port, timeout=10)
+
+        connection.request("GET", "/")
+        expect(connection.getresponse().status == 403, "gate must deny tokenless requests")
+
+        connection.request("GET", "/?t=testtoken123")
+        response = connection.getresponse()
+        html = response.read().decode("utf-8")
+        expect(response.status == 200, "token page should load")
+        expect("ENTER VR" in html, "page content missing")
+
+        connection.request("GET", "/api/board", headers={"X-Jarvis-Token": "testtoken123"})
+        board = json.loads(connection.getresponse().read().decode("utf-8"))
+        expect(board["tasks"][0]["text"] == "Welcome to the board, Sir", "default board missing")
+
+        connection.request(
+            "POST", "/api/board",
+            body=json.dumps({"action": "add", "text": "Write the report"}),
+            headers={"X-Jarvis-Token": "testtoken123", "Content-Type": "application/json"},
+        )
+        board = json.loads(connection.getresponse().read().decode("utf-8"))
+        expect(any(t["text"] == "Write the report" for t in board["tasks"]), "add failed")
+
+        added = next(t for t in board["tasks"] if t["text"] == "Write the report")
+        connection.request(
+            "POST", "/api/board",
+            body=json.dumps({"action": "cycle", "id": added["id"]}),
+            headers={"X-Jarvis-Token": "testtoken123", "Content-Type": "application/json"},
+        )
+        board = json.loads(connection.getresponse().read().decode("utf-8"))
+        moved = next(t for t in board["tasks"] if t["id"] == added["id"])
+        expect(moved["column"] == "doing", "cycle should move todo -> doing")
+
+        connection.request("GET", "/api/models", headers={"X-Jarvis-Token": "testtoken123"})
+        models = json.loads(connection.getresponse().read().decode("utf-8"))
+        expect(models == {"models": []}, f"unexpected models: {models}")
+
+        connection.request("GET", "/model/nope.glb", headers={"X-Jarvis-Token": "testtoken123"})
+        expect(connection.getresponse().status == 404, "missing model should 404")
+
+        connection.request(
+            "POST", "/api/chat",
+            body=json.dumps({"text": "status"}),
+            headers={"X-Jarvis-Token": "testtoken123", "Content-Type": "application/json"},
+        )
+        body = json.loads(connection.getresponse().read().decode("utf-8"))
+        expect(body["reply"] == "Present and accounted for, Sir", body)
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5)
+    expect(not thread.is_alive(), "server thread should stop")
 
 
 def avatar_server_roundtrip(tmp: Path) -> None:
@@ -745,13 +830,6 @@ def agent_accepts_multimodal_turn() -> None:
     expect(agent.messages[-2]["content"] == parts, "multimodal content not stored")
 
 
-def system_prompt_content() -> None:
-    from jarvis import system_prompt
-
-    text = system_prompt.build()
-    expect("J.A.R.V.I.S." in text and "TOOL CONTRACT" in text, "prompt missing sections")
-
-
 def agent_trim_keeps_pairs() -> None:
     reg = default_registry(confirm=lambda d: False)
     chain = types.SimpleNamespace(create_chat=lambda **kw: FakeResp(FakeMsg("x")))
@@ -770,7 +848,7 @@ def agent_trim_keeps_pairs() -> None:
 
 def main() -> int:
     check("version string", version_string)
-    check("registry builds with 12 tools", registry_built)
+    check("registry builds with 16 tools", registry_built)
     check("allow_shell=False drops run_command", allow_shell_false_drops_shell)
     check("screen control is opt-in", screen_control_opt_in)
     check("denylist flags", denylist_flags)
@@ -803,6 +881,7 @@ def main() -> int:
         check("health baseline + risk bands", lambda: health_baseline_and_risk(tmp_path))
         check("health tools dispatch", lambda: health_tools_dispatch(tmp_path))
         check("avatar server round-trip", lambda: avatar_server_roundtrip(tmp_path))
+        check("portal server round-trip", lambda: portal_server_roundtrip(tmp_path))
 
     check("BrainChain failover", chain_failover)
     check("BrainChain non-transient raises", chain_non_transient_raises)

@@ -29,6 +29,7 @@ Works with a **cloud brain** (Z.AI GLM, OpenAI, Google Gemini, or any OpenAI-com
 | **Screen control** | Opt-in `screen_click` / `screen_type` / `screen_press` / `screen_scroll` — every action confirm-gated, pyautogui failsafe armed |
 | **Health (Mark V)** | The Oracle: HR/HRV samples from wearable CSV exports, screened against your own 30-day baseline with sigma-level risk bands — local, honest, not a diagnosis |
 | **Avatar (Mark VI)** | `jarvis face` — a local web face with lip-synced spoken replies; bring your own VRM model for full 3D |
+| **Portal (Mark VII)** | `jarvis portal` — a WebXR room for headsets and phones: JARVIS chat panel floating in your space, a kanban wall you cycle by pinch/trigger, your GLB models on a desk |
 
 ## Install
 
@@ -158,6 +159,19 @@ Opens a local page (`127.0.0.1` only, never exposed to your network): a **proced
 - **Bring your own 3D model:** drop any `avatar.vrm` (export one from free VRoid Studio) into `%APPDATA%\jarvis\` and press MODE → the page loads it through three-vrm as a full 3D character with idle sway, blinking, and viseme-driven mouth. No licensed character ships with this software — like your key, the model is yours.
 - Conversation-only by design: the avatar is the face; tools stay at the terminal where their confirmations live.
 
+## Portal — the XR room (Mark VII)
+
+```bash
+jarvis portal
+```
+
+Opens a **WebXR room** served by your PC: JARVIS as a floating chat panel in your space, a **kanban wall** on your wall (select a card with trigger or pinch to cycle it across the board), and a desk for your own GLB models (drop `.glb` files into the `models` folder of the config directory).
+
+- Works in a **headset browser** (immersive-vr with DOM-overlay text input, hand-tracking pinch), in **AR on your phone**, and as a **2D fallback** in any desktop browser
+- Text entry in-headset rides the DOM Overlay (Quest Browser supports it)
+- **Security:** the portal is the one component bound to your **LAN** — a headset is a separate device and cannot reach `127.0.0.1`. Exposure is gated by a random per-session token (printed with the URL when you start it), the server stops with Ctrl+C, and it never runs unless you start it
+- The XR rendering can only be judged in a headset — HTTP contract, storage, and gating are all covered by the test suite
+
 ## Security model
 
 - **Bring your own key.** No API key ships with this software — anyone who hardcodes a shared key into a public repo gets it drained within hours.
@@ -209,6 +223,7 @@ src/jarvis/
 - [x] Streaming responses
 - [x] Hands-free wake word
 - [x] Health: HR/HRV screening against your own baseline (the Oracle)
+- [x] Portal: WebXR room for headsets (chat panel, kanban wall, desk models)
 - [ ] Multi-monitor vision, clipboard paste for non-ASCII typing, wake-word tuning UI
 
 ## License
