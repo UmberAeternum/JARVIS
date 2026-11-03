@@ -1,0 +1,66 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "jarvis-ai"
+version = "1.4.0"
+description = "J.A.R.V.I.S. - a personal AI assistant with a safe tool-execution backend (cloud or local brain)."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "umbra" }]
+keywords = ["assistant", "agent", "llm", "tools", "ollama", "openai"]
+classifiers = [
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: Microsoft :: Windows",
+    "Programming Language :: Python :: 3",
+    "Topic :: Software Development :: Libraries :: Application Frameworks",
+]
+dependencies = [
+    "openai>=1.40.0",
+    "rich>=13.0.0",
+    "ddgs>=9.0.0",
+    "psutil>=5.9.0",
+]
+
+[project.scripts]
+jarvis = "jarvis.cli:main"
+
+[project.optional-dependencies]
+secure = ["keyring>=24.0.0"]
+# Voice (Mark II) - vosk installs on any CPython (incl. 3.15); whisper needs <=3.13
+voice = [
+    "sounddevice>=0.4.6",
+    "numpy>=1.26.0",
+    "pyttsx3>=2.90",
+    "vosk>=0.3.45",
+]
+voice-whisper = [
+    "faster-whisper>=1.0.0",
+    "sounddevice>=0.4.6",
+    "numpy>=1.26.0",
+    "pyttsx3>=2.90",
+]
+vision = [
+    "mss>=9.0.0",
+    "pillow>=10.0.0",
+]
+control = [
+    "pyautogui>=0.9.54",
+]
+all = [
+    "keyring>=24.0.0",
+    "sounddevice>=0.4.6",
+    "numpy>=1.26.0",
+    "pyttsx3>=2.90",
+    "vosk>=0.3.45",
+    "mss>=9.0.0",
+    "pillow>=10.0.0",
+    "pyautogui>=0.9.54",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
