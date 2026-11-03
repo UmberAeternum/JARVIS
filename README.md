@@ -6,6 +6,8 @@
 
 Works with a **cloud brain** (Z.AI GLM, OpenAI, Google Gemini, or any OpenAI-compatible API) or a **local brain** (Ollama / LM Studio) — and can chain both: a cloud primary with a local fallback that takes over automatically when you're offline or rate-limited.
 
+**Companion project:** [jarvis-launcher](https://github.com/UmberAeternum/jarvis-launcher) — the same brain as an Android home-screen replacement: sci-fi HUD, pulsing AI core, inline chat, hold-to-talk.
+
 ## Features
 
 | Tool | What it does |
