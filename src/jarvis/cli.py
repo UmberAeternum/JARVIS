@@ -346,12 +346,14 @@ def main(argv: list[str] | None = None) -> int:
             "       jarvis watch [--interval N] [--monitor N] [--max-iterations N]\n"
             "       jarvis wake\n"
             "       jarvis health\n"
+            "       jarvis face\n"
             "  --voice     start with push-to-talk voice input (Mark II)\n"
             "  --live      start with live screen sharing (Mark III)\n"
             "  --dry-run   start in simulation mode (tools plan, never execute)\n"
             "  watch       ambient screen observation loop\n"
             "  wake        hands-free voice mode: say 'Jarvis' + command\n"
-            "  health      the Oracle: HR/HRV screening report"
+            "  health      the Oracle: HR/HRV screening report\n"
+            "  face        the Avatar: local web face + chat (Mark VI)"
         )
         return 0
     if argv and argv[0] == "watch":
@@ -369,6 +371,16 @@ def main(argv: list[str] | None = None) -> int:
 
         console.print(Panel(health.risk_assessment(), title="THE ORACLE", border_style="cyan"))
         return 0
+    if argv and argv[0] == "face":
+        from .avatar import run_avatar
+
+        if config.Config.load() is None:
+            console.print(
+                "[yellow]No brain configured yet.[/] Run [bold]python -m jarvis[/] "
+                "once and complete the wizard - the avatar speaks through that brain."
+            )
+            return 1
+        return run_avatar(console)
 
     dry_run = "--dry-run" in argv
     voice_requested = "--voice" in argv

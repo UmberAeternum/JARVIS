@@ -28,6 +28,7 @@ Works with a **cloud brain** (Z.AI GLM, OpenAI, Google Gemini, or any OpenAI-com
 | **Wake word** | `jarvis wake`: hands-free — say "Jarvis", speak a command, get a spoken answer (local Vosk detection) |
 | **Screen control** | Opt-in `screen_click` / `screen_type` / `screen_press` / `screen_scroll` — every action confirm-gated, pyautogui failsafe armed |
 | **Health (Mark V)** | The Oracle: HR/HRV samples from wearable CSV exports, screened against your own 30-day baseline with sigma-level risk bands — local, honest, not a diagnosis |
+| **Avatar (Mark VI)** | `jarvis face` — a local web face with lip-synced spoken replies; bring your own VRM model for full 3D |
 
 ## Install
 
@@ -145,6 +146,17 @@ Screening heuristic against your own baseline - not a medical diagnosis.
 - Data lives in `%APPDATA%\jarvis\health.db`, local only. In-chat: `health_log`, `health_import`, `health_check`, `health_trend`.
 
 
+
+## Avatar — the face (Mark VI)
+
+```bash
+jarvis face
+```
+
+Opens a local page (`127.0.0.1` only, never exposed to your network): a **procedural HUD face** — blinking eyes, a mouth that moves while the reply is spoken, waveform ring while talking — plus a full chat panel. Replies are spoken by your browser's TTS, and the mouth is driven by the utterance's real boundary events.
+
+- **Bring your own 3D model:** drop any `avatar.vrm` (export one from free VRoid Studio) into `%APPDATA%\jarvis\` and press MODE → the page loads it through three-vrm as a full 3D character with idle sway, blinking, and viseme-driven mouth. No licensed character ships with this software — like your key, the model is yours.
+- Conversation-only by design: the avatar is the face; tools stay at the terminal where their confirmations live.
 
 ## Security model
 

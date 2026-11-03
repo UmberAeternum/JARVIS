@@ -101,7 +101,7 @@ class FakeBrain:
 
 
 def version_string() -> None:
-    expect(__version__ == "1.5.0", __version__)
+    expect(__version__ == "1.6.0", __version__)
 
 
 def registry_built() -> None:
@@ -291,6 +291,51 @@ def health_tools_dispatch(tmp: Path) -> None:
         expect("No " in out or "daily averages" in out, out)
     finally:
         config.config_dir = original
+
+
+def avatar_server_roundtrip(tmp: Path) -> None:
+    from http.client import HTTPConnection
+
+    from jarvis.avatar import PAGE, AvatarState, start_server
+
+    expect("speechSynthesis" in PAGE, "page must use browser TTS")
+    expect("/api/chat" in PAGE, "page must call the chat endpoint")
+    expect("avatar.vrm" in PAGE, "page must support the BYO VRM mode")
+    expect("127.0.0.1" not in PAGE, "page must not hardcode the host")
+
+    chain = types.SimpleNamespace(
+        create_chat=lambda messages=None, tools=None, tool_choice="auto":
+        FakeResp(FakeMsg("At your service, Sir"))
+    )
+    state = AvatarState(chain)
+    empty = state.chat("   ")
+    expect("empty message" in empty.get("error", ""), "blank input should be refused")
+
+    server, port, thread = start_server(state, preferred_port=18770)
+    try:
+        # literal loopback host: no dynamic URL anywhere in this test
+        connection = HTTPConnection("127.0.0.1", port, timeout=10)
+
+        connection.request("GET", "/")
+        html = connection.getresponse().read().decode("utf-8")
+        expect("AVATAR LINK" in html, "page not served")
+
+        connection.request(
+            "POST", "/api/chat",
+            body=json.dumps({"text": "status"}),
+            headers={"Content-Type": "application/json"},
+        )
+        body = json.loads(connection.getresponse().read().decode("utf-8"))
+        expect(body["reply"] == "At your service, Sir", body)
+
+        connection.request("GET", "/avatar.vrm")
+        expect(connection.getresponse().status == 404, "absent VRM should 404")
+    finally:
+        server.shutdown()      # safe: serve_forever is running in a daemon thread
+        server.server_close()
+        thread.join(timeout=5)
+    expect(not thread.is_alive(), "server thread should stop")
+    expect(len(state.history) >= 3, "dialogue history should grow")
 
 
 def system_prompt_content() -> None:
@@ -757,6 +802,7 @@ def main() -> int:
         check("health store + CSV import", lambda: health_store_and_import(tmp_path))
         check("health baseline + risk bands", lambda: health_baseline_and_risk(tmp_path))
         check("health tools dispatch", lambda: health_tools_dispatch(tmp_path))
+        check("avatar server round-trip", lambda: avatar_server_roundtrip(tmp_path))
 
     check("BrainChain failover", chain_failover)
     check("BrainChain non-transient raises", chain_non_transient_raises)
