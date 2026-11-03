@@ -270,6 +270,7 @@ def default_registry(
     dry_run: bool = False,
     allow_memory: bool = True,
     allow_health: bool = True,
+    allow_sentinel: bool = True,
     allow_screen_control: bool = False,
 ) -> ToolRegistry:
     """Build the registry with every tool registered.
@@ -279,6 +280,8 @@ def default_registry(
     - persistent memory tools (allow_memory=True by default, zero dependencies)
     - health tools (allow_health=True by default - local HR/HRV screening,
       see health.py)
+    - sentinel reminder tools (allow_sentinel=True by default - the proactive
+      layer, see sentinel.py)
     - screen control tools (allow_screen_control=False by default - the model's
       hands on the display; every action is confirm-gated; enable via the
       vision.screen_control config flag)
@@ -372,6 +375,10 @@ def default_registry(
         from .health import register_health_tools
 
         register_health_tools(reg)
+    if allow_sentinel:
+        from .sentinel import register_sentinel_tools
+
+        register_sentinel_tools(reg)
     if allow_screen_control:
         from .screen_tools import register_screen_tools
 

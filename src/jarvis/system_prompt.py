@@ -34,6 +34,13 @@ TOOL_CONTRACT = """\
   environment with memory_save as you learn them; consult memory_search when
   prior context would change your answer.
 
+[SENTINEL]
+- reminder tools (reminder_set, reminder_list, reminder_cancel) exist; the
+  Sentinel daemon announces them aloud at the chosen time.
+- When the user says "remind me..." or "at 7, ...", set a reminder instead of
+  merely acknowledging. daily for wall-clock times ("07:30"), one-shot for
+  date-times.
+
 [HEALTH SIGNALS]
 - health tools (health_log, health_import, health_check, health_trend) read
   the user's locally stored HR/HRV samples.

@@ -30,6 +30,7 @@ Works with a **cloud brain** (Z.AI GLM, OpenAI, Google Gemini, or any OpenAI-com
 | **Health (Mark V)** | The Oracle: HR/HRV samples from wearable CSV exports, screened against your own 30-day baseline with sigma-level risk bands — local, honest, not a diagnosis |
 | **Avatar (Mark VI)** | `jarvis face` — a local web face with lip-synced spoken replies; bring your own VRM model for full 3D |
 | **Portal (Mark VII)** | `jarvis portal` — a WebXR room for headsets and phones: JARVIS chat panel floating in your space, a kanban wall you cycle by pinch/trigger, your GLB models on a desk |
+| **Sentinel (Mark VIII)** | Reminders and a spoken morning briefing (health + kanban + memory) from a standalone local daemon — it initiates, needs no key, announces only |
 
 ## Install
 
@@ -172,6 +173,19 @@ Opens a **WebXR room** served by your PC: JARVIS as a floating chat panel in you
 - **Security:** the portal is the one component bound to your **LAN** — a headset is a separate device and cannot reach `127.0.0.1`. Exposure is gated by a random per-session token (printed with the URL when you start it), the server stops with Ctrl+C, and it never runs unless you start it
 - The XR rendering can only be judged in a headset — HTTP contract, storage, and gating are all covered by the test suite
 
+## Sentinel — the proactive layer (Mark VIII)
+
+```bash
+jarvis sentinel
+```
+
+The assistant finally **initiates**: a standalone local daemon that fires persisted reminders aloud at their time and delivers a spoken **morning briefing** — health screening result, kanban digest, recent memory — every day at a fixed hour.
+
+- Set reminders by voice or text: *"remind me at 07:30 to stand up"* (daily) or *"remind me 2026-11-20 09:00 to call the lab"* (one-shot) — the agent stores it through `reminder_set`; the daemon announces it
+- **Needs no API key**: reminders, the briefing, and their storage are all local — the Sentinel works even before a brain is configured
+- **Announces only, by design**: no tool execution happens while you're away from the confirmation gates
+- Briefing sources are the same local stores: `health.db`, `board.json`, `memory.db`
+
 ## Security model
 
 - **Bring your own key.** No API key ships with this software — anyone who hardcodes a shared key into a public repo gets it drained within hours.
@@ -224,6 +238,7 @@ src/jarvis/
 - [x] Hands-free wake word
 - [x] Health: HR/HRV screening against your own baseline (the Oracle)
 - [x] Portal: WebXR room for headsets (chat panel, kanban wall, desk models)
+- [x] Sentinel: reminders, morning briefing, proactive layer
 - [ ] Multi-monitor vision, clipboard paste for non-ASCII typing, wake-word tuning UI
 
 ## License

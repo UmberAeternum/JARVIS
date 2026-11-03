@@ -346,6 +346,7 @@ def main(argv: list[str] | None = None) -> int:
             "       jarvis watch [--interval N] [--monitor N] [--max-iterations N]\n"
             "       jarvis wake\n"
             "       jarvis health\n"
+            "       jarvis sentinel\n"
             "       jarvis face\n"
             "       jarvis portal\n"
             "  --voice     start with push-to-talk voice input (Mark II)\n"
@@ -354,6 +355,7 @@ def main(argv: list[str] | None = None) -> int:
             "  watch       ambient screen observation loop\n"
             "  wake        hands-free voice mode: say 'Jarvis' + command\n"
             "  health      the Oracle: HR/HRV screening report\n"
+            "  sentinel    the Sentinel: reminders + morning briefing daemon\n"
             "  face        the Avatar: local web face + chat (Mark VI)\n"
             "  portal      the Portal: WebXR room for headsets (Mark VII)"
         )
@@ -373,6 +375,10 @@ def main(argv: list[str] | None = None) -> int:
 
         console.print(Panel(health.risk_assessment(), title="THE ORACLE", border_style="cyan"))
         return 0
+    if argv and argv[0] == "sentinel":
+        from .sentinel import run_sentinel
+
+        return run_sentinel(console)
     if argv and argv[0] == "face":
         from .avatar import run_avatar
 

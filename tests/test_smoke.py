@@ -101,12 +101,12 @@ class FakeBrain:
 
 
 def version_string() -> None:
-    expect(__version__ == "1.7.0", __version__)
+    expect(__version__ == "1.8.0", __version__)
 
 
 def registry_built() -> None:
     reg = default_registry(confirm=lambda d: False)
-    expect(len(reg.schemas) == 16, f"expected 16 tools, got {len(reg.schemas)}")
+    expect(len(reg.schemas) == 19, f"expected 19 tools, got {len(reg.schemas)}")
 
 
 def allow_shell_false_drops_shell() -> None:
@@ -423,6 +423,85 @@ def avatar_server_roundtrip(tmp: Path) -> None:
     expect(len(state.history) >= 3, "dialogue history should grow")
 
 
+def sentinel_parse_and_due() -> None:
+    from datetime import datetime
+
+    from jarvis.sentinel import due_now, parse_when
+
+    kind, value = parse_when("07:30")
+    expect(kind == "daily" and value == "07:30", "daily parse")
+    kind, value = parse_when("2026-11-10 07:30")
+    expect(kind == "once" and value.startswith("2026-11-10T07:30"), "once parse")
+    try:
+        parse_when("sometime next week")
+        raise AssertionError("garbage should raise")
+    except ValueError:
+        pass
+
+    fired: dict = {}
+    daily = {"id": 1, "kind": "daily", "when": "07:30", "text": "up"}
+    at_06 = datetime(2026, 11, 10, 6, 0).astimezone()
+    at_08 = datetime(2026, 11, 10, 8, 0).astimezone()
+    expect(not due_now(daily, at_06, fired), "daily must not fire before its time")
+    expect(due_now(daily, at_08, fired), "daily must fire after its time")
+    fired[1] = "2026-11-10"
+    expect(not due_now(daily, at_08, fired), "daily must not refire the same day")
+
+    once = {"id": 2, "kind": "once", "when": at_08.isoformat(), "text": "call"}
+    before = datetime(2026, 11, 10, 7, 0).astimezone()
+    expect(not due_now(once, before, {}), "one-shot must not fire early")
+    expect(due_now(once, at_08, {}), "one-shot must fire when due")
+
+
+def sentinel_store_and_tools(tmp: Path) -> None:
+    original = config.config_dir
+    config.config_dir = lambda: tmp / "cfgsentinel"
+    try:
+        from jarvis.sentinel import add_reminder, cancel_reminder, load_reminders
+
+        reminder = add_reminder("Stand up, Sir", "07:30")
+        expect(reminder["kind"] == "daily" and reminder["id"] == 1, "daily add")
+        add_reminder("Call the lab", "2026-11-10 07:30")
+        expect(len(load_reminders()) == 2, "two reminders stored")
+        expect(cancel_reminder(2), "cancel should succeed")
+        expect(len(load_reminders()) == 1, "cancel should remove")
+
+        reg = default_registry(confirm=lambda d: False)
+        out = reg.dispatch("reminder_set", json.dumps({"text": "Morning briefing", "at_time": "07:00"}))
+        expect("daily at 07:00" in out, out)
+        out = reg.dispatch("reminder_list", "{}")
+        expect("Stand up" in out and "Morning briefing" in out, out)
+        out = reg.dispatch("reminder_cancel", json.dumps({"reminder_id": 1}))
+        expect(out.startswith("BLOCKED"), f"expected BLOCKED, got: {out}")
+    finally:
+        config.config_dir = original
+
+
+def sentinel_briefing_composer(tmp: Path) -> None:
+    original = config.config_dir
+    config.config_dir = lambda: tmp / "cfgbrief"
+    try:
+        from jarvis import health
+        from jarvis.portal import save_board
+        from jarvis.memory import save_note
+        from jarvis.sentinel import compose_briefing
+
+        empty = compose_briefing()
+        expect("INSUFFICIENT" in empty, "empty health should say so honestly")
+        expect("Kanban: 0" in empty, "empty kanban should read zero")
+
+        save_board({"tasks": [{"id": 1, "column": "doing", "text": "Ship Mark VIII"},
+                              {"id": 2, "column": "todo", "text": "Feed the Oracle"}]})
+        save_note("Sir prefers concise briefings")
+        health.add_sample(health.KIND_HRV, 50.0)  # one recent sample
+        report = compose_briefing()
+        expect("Kanban: 1" in report, report)
+        expect("Ship Mark VIII" not in report or "concise" in report, "briefing summarises")
+        expect("Recent memory" in report, "memory recap missing")
+    finally:
+        config.config_dir = original
+
+
 def system_prompt_content() -> None:
     from jarvis import system_prompt
 
@@ -430,6 +509,7 @@ def system_prompt_content() -> None:
     expect("J.A.R.V.I.S." in text and "TOOL CONTRACT" in text, "prompt missing sections")
     expect("PERSISTENT MEMORY" in text, "memory contract missing")
     expect("HEALTH SIGNALS" in text, "health guidance missing")
+    expect("SENTINEL" in text, "sentinel guidance missing")
 
 
 def denylist_flags() -> None:
@@ -880,6 +960,8 @@ def main() -> int:
         check("health store + CSV import", lambda: health_store_and_import(tmp_path))
         check("health baseline + risk bands", lambda: health_baseline_and_risk(tmp_path))
         check("health tools dispatch", lambda: health_tools_dispatch(tmp_path))
+        check("sentinel store + tools", lambda: sentinel_store_and_tools(tmp_path))
+        check("sentinel briefing composer", lambda: sentinel_briefing_composer(tmp_path))
         check("avatar server round-trip", lambda: avatar_server_roundtrip(tmp_path))
         check("portal server round-trip", lambda: portal_server_roundtrip(tmp_path))
 
@@ -895,6 +977,7 @@ def main() -> int:
     check("agent accepts multimodal turn", agent_accepts_multimodal_turn)
     check("agent streams replies", agent_streams_replies)
     check("wake word matcher", wake_word_matcher)
+    check("sentinel time parsing + due logic", sentinel_parse_and_due)
 
     failed = [r for r in results if not r[0]]
     for ok, name, detail in results:
