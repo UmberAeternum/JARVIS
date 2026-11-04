@@ -1,18 +1,18 @@
-jarvis: the Mission Control (local web dashboard)
+Mark XVI: onboarding wizard + settings
 
-A single-page mission control served on 127.0.0.1 only - every subsystem
-visual and clickable instead of CLI-only. Tabs: Chat (with past sessions),
-the Oracle (health screening), the second brain (memory), the kanban board,
-watchtower rules, and settings (brain + PRO license activation).
-
-- dashboard.py: local-only HTTP server (port auto-picked from 8773+),
-  DashboardState with brain chain + bounded history, JSON API endpoints.
-  Lazily imports subsystem modules; settings save preserves a blank key
-  field and rebuilds the brain chain; kanban cycling reuses portal.cycle_task.
-- dashboard_page.py: single-file HUD client, no external assets.
-- cli: jarvis dashboard (LITE - no network exposure, no tool execution).
-- Tests: page markers + full server round-trip (page, state, chat,
-  memory save/list/forget, kanban add/cycle, watch add/remove, settings
-  key preservation, license refusal, 404). Removed a duplicated check
-  registration.
-- Version 3.2.0.
+- jarvis setup runs the onboarding wizard on demand (the wizard already
+  auto-triggers on first run). setup --yes is a non-interactive CI path:
+  --local, --provider, --model, --base-url; the key comes from --api-key
+  or the UMBRA_API_KEY env var; live key validation is skipped; secrets
+  are never echoed (masked only).
+- The wizard gains an optional voice step and an optional PRO license
+  activation step at the end of onboarding.
+- jarvis settings show (redacted dump - keys masked, license key never
+  printed), set <key>=<value> (strict dotted whitelist; brains.fallback.*
+  materializes a fallback brain; secrets masked in the confirmation),
+  reset [--yes] (wipes brain settings only - memories, health data and
+  the license key are kept).
+- settings.py holds pure helpers (apply_setting, show_text, reset_config)
+  so the CLI stays thin; tests cover redaction, type coercion, whitelist
+  refusal, and all non-interactive paths.
+- Version 3.3.0.

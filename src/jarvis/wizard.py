@@ -3,11 +3,13 @@
 The key is captured with getpass (never echoed), validated with a real API
 call before anything is persisted, then stored in the OS keychain (when the
 keyring extra is installed and the user opts in) or in the user's config
-file. The wizard can be re-run any time with /setup.
+file. The wizard can be re-run any time with /setup or `jarvis setup`.
+`jarvis setup --yes` runs the same flow without prompts for CI (Mark XVI).
 """
 
 from __future__ import annotations
 
+import os
 from getpass import getpass
 
 from rich.console import Console
@@ -15,7 +17,7 @@ from rich.panel import Panel
 from rich.prompt import Confirm, Prompt
 
 from . import brain, config
-from .config import BrainConfig, BrainsConfig, Config, mask_key
+from .config import BrainConfig, BrainsConfig, Config, VoiceConfig, mask_key
 
 WIZARD_TITLE = "[bold cyan]J.A.R.V.I.S. - setup[/]"
 
@@ -130,9 +132,18 @@ def run_wizard(console: Console) -> Config:
     ):
         fallback = _setup_brain(console, "fallback")
 
+    voice_enabled = Confirm.ask(
+        "Enable push-to-talk voice input? (needs the voice extra: pip install \"jarvis-ai[voice]\")",
+        default=False,
+    )
+    tts_enabled = True
+    if voice_enabled:
+        tts_enabled = Confirm.ask("Speak replies aloud?", default=True)
+
     cfg = Config(
         brains=BrainsConfig(primary=primary, fallback=fallback),
         use_keyring=use_keyring,
+        voice=VoiceConfig(enabled=voice_enabled, tts_enabled=tts_enabled),
     )
     path = cfg.save()
     key = primary.api_key or config.load_key("primary") or ""
@@ -146,4 +157,70 @@ def run_wizard(console: Console) -> Config:
         )
         + f"  key storage: {'OS keychain' if use_keyring and config.keyring_available() else 'config file'}"
     )
+
+    # optional PRO activation right at the end of onboarding
+    if Confirm.ask("Activate a PRO license key now?", default=False):
+        from . import licensing
+
+        lic_key = getpass("License key (input hidden): ").strip()
+        if lic_key:
+            ok, message = licensing.install_license(lic_key)
+            style = "green" if ok else "red"
+            console.print(f"  [{style}]{message}[/]")
     return cfg
+
+
+def setup_noninteractive(args: list[str]) -> tuple[Config | None, str]:
+    """jarvis setup --yes [--local] [--provider ID] [--model M]
+                          [--base-url URL] [--api-key KEY]
+
+    Never prompts. The API key comes from --api-key or the UMBRA_API_KEY
+    environment variable (argv values can leak into process listings, so the
+    env var is the recommended CI channel). Live key validation is skipped in
+    this mode. Returns (config, message); config is None on failure. Messages
+    never contain the key material.
+    """
+    def flag(name: str) -> str | None:
+        if name in args:
+            index = args.index(name)
+            if index + 1 < len(args):
+                return args[index + 1]
+        return None
+
+    provider = flag("--provider")
+    model = flag("--model")
+    base_url = flag("--base-url")
+    api_key = flag("--api-key") or os.environ.get("UMBRA_API_KEY", "")
+
+    if "--local" in args:
+        primary = BrainConfig(
+            type="local",
+            provider=provider or "ollama",
+            base_url=base_url or "http://localhost:11434/v1",
+            model=model or "qwen2.5:7b",
+            api_key="local",
+        )
+    else:
+        if provider is None:
+            return None, "--yes needs --provider <id> (or --local for Ollama)."
+        if provider not in brain.PROVIDERS:
+            return None, f"unknown provider: {provider} (known: {', '.join(brain.PROVIDERS)})"
+        preset = brain.PROVIDERS[provider]
+        if provider == "custom" and not base_url:
+            return None, "provider 'custom' needs --base-url <url>."
+        if not api_key:
+            return None, "cloud setup needs an API key: pass --api-key or set UMBRA_API_KEY."
+        primary = BrainConfig(
+            type="cloud",
+            provider=provider,
+            base_url=base_url or preset["base_url"],
+            model=model or preset["model"],
+            api_key=api_key,
+        )
+    cfg = Config(brains=BrainsConfig(primary=primary), use_keyring=False)
+    path = cfg.save()
+    message = (
+        f"Configuration written to {path}\n"
+        f"  primary: {primary.provider} ({primary.model})  key: {mask_key(primary.api_key)}"
+    )
+    return cfg, message

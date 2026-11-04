@@ -105,7 +105,7 @@ class FakeBrain:
 
 
 def version_string() -> None:
-    expect(__version__ == "3.2.0", __version__)
+    expect(__version__ == "3.3.0", __version__)
 
 
 def registry_built() -> None:
@@ -1431,6 +1431,99 @@ def dashboard_server_roundtrip(tmp: Path) -> None:
         config.config_dir = original
 
 
+def settings_apply_and_redact(tmp: Path) -> None:
+    from jarvis.config import mask_key
+    from jarvis.settings import apply_setting, reset_config, show_text
+
+    original = config.config_dir
+    config.config_dir = lambda: tmp / "cfgset"
+    try:
+        cfg = config.Config(brains=config.BrainsConfig(
+            primary=config.BrainConfig(type="cloud", provider="zai",
+                                       base_url="https://x/v1", model="m",
+                                       api_key=FAKE_KEY)))
+        second = "sk-" + "9f8e7d6c" * 4
+
+        expect(apply_setting(cfg, "voice.enabled", "true") and cfg.voice.enabled is True,
+               "bool set failed")
+        expect(apply_setting(cfg, "vision.interval_s", "45").endswith("45"), "int confirm")
+        expect(cfg.vision.interval_s == 45, "int not applied")
+        apply_setting(cfg, "brains.primary.model", "glm-x")
+        expect(cfg.brains.primary.model == "glm-x", "model not applied")
+        apply_setting(cfg, "brains.fallback.model", "fb-model")
+        expect(cfg.brains.fallback is not None and cfg.brains.fallback.model == "fb-model",
+               "fallback.* key must materialize the fallback brain")
+
+        confirm = apply_setting(cfg, "brains.primary.api_key", second)
+        expect(cfg.brains.primary.api_key == second, "key not applied")
+        expect(second not in confirm and FAKE_KEY not in confirm,
+               "secret echoed in confirmation")
+
+        text = show_text(cfg)
+        expect(FAKE_KEY not in text, "old key leaked in show")
+        expect(second not in text, "new key leaked in show")
+        expect(mask_key(second) in text, "masked key should be shown")
+        expect("glm-x" in text and "fb-model" in text, "show must describe brains")
+
+        try:
+            apply_setting(cfg, "not.a.setting", "x")
+        except KeyError:
+            pass
+        else:
+            raise AssertionError("unknown dotted key must raise KeyError")
+        try:
+            apply_setting(cfg, "vision.interval_s", "abc")
+        except ValueError:
+            pass
+        else:
+            raise AssertionError("bad integer must raise ValueError")
+
+        path = cfg.save()
+        expect(path.exists(), "config should exist before reset")
+        expect("removed" in reset_config().lower(), "reset message")
+        expect(not path.exists(), "reset must delete the config file")
+        expect("nothing to reset" in reset_config().lower(), "second reset is a no-op")
+    finally:
+        config.config_dir = original
+
+
+def setup_noninteractive_paths(tmp: Path) -> None:
+    from jarvis.config import mask_key
+    from jarvis.wizard import setup_noninteractive
+
+    original = config.config_dir
+    config.config_dir = lambda: tmp / "cfgyes"
+    try:
+        cfg, message = setup_noninteractive(["--local"])
+        expect(cfg is not None and cfg.brains.primary.type == "local", "local path failed")
+        expect(FAKE_KEY not in message, "no secret should appear in output")
+
+        cfg2, message2 = setup_noninteractive(["--provider", "zai"])
+        expect(cfg2 is None, "cloud without key must be refused")
+        expect("UMBRA_API_KEY" in message2, message2)
+
+        cfg3, message3 = setup_noninteractive(["--provider", "custom"])
+        expect(cfg3 is None and "--base-url" in message3, message3)
+
+        cfg4, message4 = setup_noninteractive(["--provider", "nope"])
+        expect(cfg4 is None and "unknown provider" in message4, message4)
+
+        cfg5, message5 = setup_noninteractive(
+            ["--provider", "zai", "--api-key", FAKE_KEY, "--model", "glm-flash"]
+        )
+        expect(cfg5 is not None, "cloud+key path failed")
+        expect(cfg5.brains.primary.model == "glm-flash", "model not applied")
+        expect(cfg5.brains.primary.api_key == FAKE_KEY, "key not stored")
+        expect(FAKE_KEY not in message5, "key leaked in setup message")
+        expect(mask_key(FAKE_KEY) in message5, "masked key should be shown")
+
+        reloaded = config.Config.load()
+        expect(reloaded is not None and reloaded.brains.primary.model == "glm-flash",
+               "non-interactive config not persisted")
+    finally:
+        config.config_dir = original
+
+
 def main() -> int:
     check("version string", version_string)
     check("registry builds with 22 tools", registry_built)
@@ -1476,6 +1569,8 @@ def main() -> int:
         check("portal server round-trip", lambda: portal_server_roundtrip(tmp_path))
         check("bridge confirm + events", lambda: bridge_confirm_and_events(tmp_path))
         check("dashboard server round-trip", lambda: dashboard_server_roundtrip(tmp_path))
+        check("settings apply + redaction", lambda: settings_apply_and_redact(tmp_path))
+        check("setup --yes non-interactive paths", lambda: setup_noninteractive_paths(tmp_path))
 
     check("BrainChain failover", chain_failover)
     check("BrainChain non-transient raises", chain_non_transient_raises)

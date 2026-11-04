@@ -463,6 +463,8 @@ def main(argv: list[str] | None = None) -> int:
             "  portal      the Portal: WebXR room for headsets (Mark VII)\n"
             "  serve       the Bridge: full agent over the LAN (Mark IX)\n"
             "  dashboard   the Mission Control: local web dashboard\n"
+            "  setup       run the onboarding wizard (setup --yes for CI)\n"
+            "  settings    show | set <key>=<value> | reset [--yes]\n"
             "  license     activate <key> | status - PRO licensing"
         )
         return 0
@@ -529,6 +531,63 @@ def main(argv: list[str] | None = None) -> int:
             )
             return 1
         return run_bridge(console)
+    if argv and argv[0] == "setup":
+        from .wizard import run_wizard, setup_noninteractive
+
+        rest = argv[1:]
+        if "--yes" in rest:
+            new_cfg, message = setup_noninteractive(rest)
+            if new_cfg is None:
+                console.print(f"[red]{message}[/]")
+                return 2
+            console.print(f"[green]{message}[/]")
+            return 0
+        run_wizard(console)
+        return 0
+    if argv and argv[0] == "settings":
+        from .settings import apply_setting, reset_config, show_text
+
+        sub = argv[1] if len(argv) > 1 else "show"
+        if sub == "show":
+            current = config.Config.load()
+            if current is None:
+                console.print("[yellow]No configuration yet.[/] Run [bold]jarvis setup[/].")
+                return 1
+            console.print(Panel(show_text(current), title="SETTINGS", border_style="cyan"))
+            return 0
+        if sub == "set":
+            current = config.Config.load()
+            if current is None:
+                console.print("[yellow]No configuration yet.[/] Run [bold]jarvis setup[/].")
+                return 1
+            if len(argv) < 3 or "=" not in argv[2]:
+                console.print("usage: jarvis settings set <key>=<value>")
+                return 1
+            dotted, value = argv[2].split("=", 1)
+            try:
+                message = apply_setting(current, dotted.strip(), value.strip())
+            except KeyError:
+                console.print(f"[red]Unknown setting:[/] {dotted.strip()}")
+                return 1
+            except ValueError as exc:
+                console.print(f"[red]{exc}[/]")
+                return 1
+            current.save()
+            console.print(f"[green]{message}[/]")
+            return 0
+        if sub == "reset":
+            if "--yes" not in argv[2:]:
+                if not Confirm.ask(
+                    "Reset configuration? Brain settings are wiped; memories, "
+                    "health data and your license are kept.",
+                    default=False,
+                ):
+                    console.print("[dim]Aborted.[/]")
+                    return 1
+            console.print(reset_config())
+            return 0
+        console.print("usage: jarvis settings show | set <key>=<value> | reset [--yes]")
+        return 1
     if argv and argv[0] == "dashboard":
         from .dashboard import run_dashboard
 
