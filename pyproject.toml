@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "jarvis-ai"
-version = "2.2.0"
+version = "3.0.0"
 description = "J.A.R.V.I.S. - a personal AI assistant with a safe tool-execution backend (cloud or local brain)."
 readme = "README.md"
 requires-python = ">=3.10"
@@ -24,10 +24,12 @@ dependencies = [
     "rich>=13.0.0",
     "ddgs>=9.0.0",
     "psutil>=5.9.0",
+    "cryptography>=42.0.0",
 ]
 
 [project.scripts]
 jarvis = "jarvis.cli:main"
+umbra = "jarvis.cli:main"
 
 [project.optional-dependencies]
 secure = ["keyring>=24.0.0"]

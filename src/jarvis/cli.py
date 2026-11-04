@@ -20,12 +20,13 @@ from rich.markdown import Markdown
 from rich.panel import Panel
 from rich.prompt import Confirm
 
-from . import __version__, brain, config, publish, tools
+from . import __version__, brain, config, licensing, publish, tools
 from .agent import Agent
 from .wizard import run_wizard
 
+PRODUCT_NAME = "UMBRA"
 BANNER = (
-    "[bold cyan]J.A.R.V.I.S.[/] [dim]v{version} - primary: {provider} ({model})"
+    f"[bold cyan]{PRODUCT_NAME}[/] [dim]v{{version}} - {{tier}} tier - primary: {{provider}} ({{model}})"
     "{fallback_note}{voice_note}{vision_note}[/]"
 )
 
@@ -118,7 +119,8 @@ def _chat_loop(
         confirm=lambda description: Confirm.ask(f"[yellow]{description}[/]", default=False),
         workspace=Path.cwd(),
         dry_run=dry_run,
-        allow_screen_control=cfg.vision.screen_control,
+        allow_screen_control=cfg.vision.screen_control and licensing.is_pro(),
+        allow_watchtower=licensing.is_pro(),
     )
     agent, status_box = _rebuild(cfg, console, registry)
 
@@ -157,6 +159,7 @@ def _chat_loop(
     console.print(
         BANNER.format(
             version=__version__,
+            tier=licensing.tier(),
             provider=cfg.brains.primary.provider,
             model=cfg.brains.primary.model,
             fallback_note=fallback_note,
@@ -260,6 +263,12 @@ def _chat_loop(
             if not ok:
                 console.print(f"[yellow]{reason}[/]")
                 continue
+            if licensing.tier() != "pro":
+                console.print(
+                    "[yellow]Live vision is a PRO feature.[/] "
+                    "[bold]jarvis license activate <key>[/]"
+                )
+                continue
             live_active = not live_active
             cfg.vision.enabled = live_active
             if live_active:
@@ -342,6 +351,40 @@ def _wake_session(cfg: config.Config, console: Console) -> None:
                 console.print(f"[dim](speech failed: {exc})[/]")
 
 
+def _license_command(console: Console, args: list[str]) -> int:
+    """jarvis license activate <key> | jarvis license status"""
+    sub = args[0] if args else ""
+    if sub == "status":
+        tier = licensing.tier()
+        key = licensing.stored_key()
+        payload, _reason = licensing.validate_license(key) if key else (None, None)
+        licensed_to = payload.get("name") if payload else "(no valid license)"
+        console.print(
+            Panel(
+                f"tier: [bold]{tier}[/]\nlicensed to: {licensed_to}",
+                title="LICENSE",
+                border_style="cyan",
+            )
+        )
+        if tier != "pro":
+            console.print("[dim]PRO features (screen control, bridge, portal, "
+                          "watchtower, live vision) need a PRO license.[/]")
+        return 0
+    if sub == "activate":
+        key = " ".join(args[1:]).strip()
+        if not key:
+            console.print("[red]usage: jarvis license activate <key>[/]")
+            return 1
+        ok, message = licensing.install_license(key)
+        if ok:
+            console.print(f"[green]{message}[/]")
+            return 0
+        console.print(f"[red]{message}[/]")
+        return 1
+    console.print("usage: jarvis license activate <key> | jarvis license status")
+    return 1
+
+
 def main(argv: list[str] | None = None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
     console = Console()
@@ -366,7 +409,8 @@ def main(argv: list[str] | None = None) -> int:
             "  sentinel    the Sentinel: reminders + morning briefing daemon\n"
             "  face        the Avatar: local web face + chat (Mark VI)\n"
             "  portal      the Portal: WebXR room for headsets (Mark VII)\n"
-            "  serve       the Bridge: full agent over the LAN (Mark IX)"
+            "  serve       the Bridge: full agent over the LAN (Mark IX)\n"
+            "  license     activate <key> | status - PRO licensing"
         )
         return 0
     if argv and argv[0] == "watch":
@@ -384,6 +428,8 @@ def main(argv: list[str] | None = None) -> int:
 
         console.print(Panel(health.risk_assessment(), title="THE ORACLE", border_style="cyan"))
         return 0
+    if argv and argv[0] == "license":
+        return _license_command(console, argv[1:])
     if argv and argv[0] == "sentinel":
         from .sentinel import run_sentinel
 
@@ -407,6 +453,12 @@ def main(argv: list[str] | None = None) -> int:
                 "once and complete the wizard - the portal speaks through that brain."
             )
             return 1
+        if licensing.tier() != "pro":
+            console.print(
+                "[yellow]The Portal is a PRO feature.[/] Install a PRO license "
+                "with [bold]jarvis license activate <key>[/]."
+            )
+            return 1
         return run_portal(console)
     if argv and argv[0] == "serve":
         from .serve import run_bridge
@@ -415,6 +467,12 @@ def main(argv: list[str] | None = None) -> int:
             console.print(
                 "[yellow]No brain configured yet.[/] Run [bold]python -m jarvis[/] "
                 "once and complete the wizard - the bridge exposes that brain."
+            )
+            return 1
+        if licensing.tier() != "pro":
+            console.print(
+                "[yellow]The Bridge is a PRO feature.[/] Install a PRO license "
+                "with [bold]jarvis license activate <key>[/]."
             )
             return 1
         return run_bridge(console)

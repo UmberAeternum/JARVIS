@@ -16,6 +16,8 @@ import time
 import types
 from pathlib import Path
 
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+
 SRC = Path(__file__).resolve().parents[1] / "src"
 if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
@@ -102,7 +104,7 @@ class FakeBrain:
 
 
 def version_string() -> None:
-    expect(__version__ == "2.2.0", __version__)
+    expect(__version__ == "3.0.0", __version__)
 
 
 def registry_built() -> None:
@@ -702,6 +704,91 @@ def watchtower_rules_and_evaluators(tmp: Path) -> None:
         config.config_dir = original
 
 
+def licensing_validation(tmp: Path) -> None:
+    import base64
+
+    from cryptography.hazmat.primitives import serialization
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+
+    from jarvis import licensing
+
+    test_key = Ed25519PrivateKey.generate()
+    original = licensing.PUBLIC_KEY_B64
+    licensing.PUBLIC_KEY_B64 = base64.b64encode(
+        test_key.public_key().public_bytes(
+            serialization.Encoding.Raw, serialization.PublicFormat.Raw
+        )
+    ).decode()
+    try:
+        payload_data = {"name": "Test Buyer", "email": "t@t.io", "tier": "pro"}
+        payload_bytes = json.dumps(payload_data, separators=(",", ":")).encode()
+        signature = test_key.sign(payload_bytes)
+        key = (
+            "UMBRA-"
+            + base64.urlsafe_b64encode(payload_bytes).decode().rstrip("=")
+            + "."
+            + base64.urlsafe_b64encode(signature).decode().rstrip("=")
+        )
+        payload, reason = licensing.validate_license(key)
+        expect(payload is not None and payload["tier"] == "pro", f"valid key rejected: {reason}")
+
+        tampered = key[:-3] + ("xyz" if not key.endswith("xyz") else "abc")
+        payload_t, _ = licensing.validate_license(tampered)
+        expect(payload_t is None, "tampered key must be rejected")
+
+        payload_w, _ = licensing.validate_license("NOPE-" + key[5:])
+        expect(payload_w is None, "wrong prefix must be rejected")
+
+        payload_e, _ = licensing.validate_license(key.upper().replace("UMBRA-", "UMBRA-"))
+        expect(payload_e is None, "uppercased key must fail signature")
+    finally:
+        licensing.PUBLIC_KEY_B64 = original
+
+
+def licensing_tier_gating(tmp: Path) -> None:
+    import base64
+
+    from cryptography.hazmat.primitives import serialization
+
+    from jarvis import licensing
+
+    original = config.config_dir
+    config.config_dir = lambda: tmp / "cfglic"
+    try:
+        # no license stored: LITE
+        expect(licensing.tier() == "lite", "fresh install must be LITE")
+        lite_registry = default_registry(
+            confirm=lambda d: False, allow_screen_control=licensing.is_pro()
+        )
+        expect("screen_click" not in lite_registry.descriptions(), "LITE must exclude screen control")
+
+        # install a PRO license: PRO features unlock
+        payload_data = {"name": "Test", "email": "t@t.io", "tier": "pro"}
+        payload_bytes = json.dumps(payload_data, separators=(",", ":")).encode()
+        test_key = Ed25519PrivateKey.generate()
+        licensing.PUBLIC_KEY_B64 = base64.b64encode(
+            test_key.public_key().public_bytes(
+                serialization.Encoding.Raw, serialization.PublicFormat.Raw
+            )
+        ).decode()
+        signature = test_key.sign(payload_bytes)
+        key = (
+            "UMBRA-"
+            + base64.urlsafe_b64encode(payload_bytes).decode().rstrip("=")
+            + "."
+            + base64.urlsafe_b64encode(signature).decode().rstrip("=")
+        )
+        ok, message = licensing.install_license(key)
+        expect(ok, message)
+        expect(licensing.is_pro(), "PRO tier expected after install")
+        pro_registry = default_registry(
+            confirm=lambda d: False, allow_screen_control=licensing.is_pro()
+        )
+        expect("screen_click" in pro_registry.descriptions(), "PRO must include screen control")
+    finally:
+        config.config_dir = original
+
+
 def system_prompt_content() -> None:
     from jarvis import system_prompt
 
@@ -1164,6 +1251,8 @@ def main() -> int:
         check("sentinel store + tools", lambda: sentinel_store_and_tools(tmp_path))
         check("sentinel briefing composer", lambda: sentinel_briefing_composer(tmp_path))
         check("watchtower rules + evaluators", lambda: watchtower_rules_and_evaluators(tmp_path))
+        check("licensing validation", lambda: licensing_validation(tmp_path))
+        check("licensing tier gating", lambda: licensing_tier_gating(tmp_path))
         check("avatar server round-trip", lambda: avatar_server_roundtrip(tmp_path))
         check("portal server round-trip", lambda: portal_server_roundtrip(tmp_path))
         check("bridge confirm + events", lambda: bridge_confirm_and_events(tmp_path))
