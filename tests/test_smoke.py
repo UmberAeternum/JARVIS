@@ -104,12 +104,12 @@ class FakeBrain:
 
 
 def version_string() -> None:
-    expect(__version__ == "3.0.0", __version__)
+    expect(__version__ == "3.1.0", __version__)
 
 
 def registry_built() -> None:
     reg = default_registry(confirm=lambda d: False)
-    expect(len(reg.schemas) == 22, f"expected 22 tools, got {len(reg.schemas)}")
+    expect(len(reg.schemas) == 24, f"expected 24 tools, got {len(reg.schemas)}")
 
 
 def allow_shell_false_drops_shell() -> None:
@@ -789,6 +789,87 @@ def licensing_tier_gating(tmp: Path) -> None:
         config.config_dir = original
 
 
+def conversation_store_roundtrip(tmp: Path) -> None:
+    original = config.config_dir
+    config.config_dir = lambda: tmp / "cfgconv"
+    try:
+        from jarvis import conversations
+
+        session_id = conversations.start_session("Test session about bridges")
+        conversations.log_message(session_id, "user", "How do bridges work?")
+        conversations.log_message(session_id, "assistant", "Suspension bridges hold via cables, Sir.")
+        conversations.log_message(session_id, "user", "What about the Golden Gate?")
+
+        sessions = conversations.list_sessions()
+        expect(len(sessions) == 1 and sessions[0]["turns"] == 3, "session listing wrong")
+
+        results = conversations.search_history("Golden Gate")
+        expect(len(results) == 1 and "Golden Gate" in results[0]["content"], "search failed")
+
+        messages = conversations.session_messages(session_id)
+        expect(len(messages) == 3 and messages[0]["role"] == "user", "message order wrong")
+
+        conversations.rename_session(session_id, "Bridges")
+        sessions = conversations.list_sessions()
+        expect(sessions[0]["title"] == "Bridges", "rename failed")
+
+        # wildcard-escaping: a query with % must not match everything
+        results = conversations.search_history("100%")
+        expect(results == [], "wildcard injection must not match all")
+    finally:
+        config.config_dir = original
+
+
+def conversation_store_roundtrip(tmp: Path) -> None:
+    original = config.config_dir
+    config.config_dir = lambda: tmp / "cfgconv"
+    try:
+        from jarvis import conversations
+
+        session_id = conversations.start_session("Test session about bridges")
+        conversations.log_message(session_id, "user", "How do bridges work?")
+        conversations.log_message(session_id, "assistant", "Suspension bridges hold via cables, Sir.")
+        conversations.log_message(session_id, "user", "What about the Golden Gate?")
+
+        sessions = conversations.list_sessions()
+        expect(len(sessions) == 1 and sessions[0]["turns"] == 3, "session listing wrong")
+
+        results = conversations.search_history("Golden Gate")
+        expect(len(results) == 1 and "Golden Gate" in results[0]["content"], "search failed")
+
+        messages = conversations.session_messages(session_id)
+        expect(len(messages) == 3 and messages[0]["role"] == "user", "message order wrong")
+
+        conversations.rename_session(session_id, "Bridges")
+        sessions = conversations.list_sessions()
+        expect(sessions[0]["title"] == "Bridges", "rename failed")
+
+        # wildcard-escaping: a query with % must not match everything
+        results = conversations.search_history("100%")
+        expect(results == [], "wildcard injection must not match all")
+    finally:
+        config.config_dir = original
+
+
+def conversation_tools_dispatch(tmp: Path) -> None:
+    original = config.config_dir
+    config.config_dir = lambda: tmp / "cfgconvtools"
+    try:
+        from jarvis import conversations as conv
+
+        reg = default_registry(confirm=lambda d: False)
+        sid = conv.start_session("probe")
+        conv.log_message(sid, "user", "Where is my deploy key?")
+        conv.log_message(sid, "assistant", "In your vault, Sir.")
+
+        out = reg.dispatch("history_search", json.dumps({"query": "deploy key"}))
+        expect("deploy key" in out, out)
+        out = reg.dispatch("history_sessions", "{}")
+        expect("probe" in out, out)
+    finally:
+        config.config_dir = original
+
+
 def system_prompt_content() -> None:
     from jarvis import system_prompt
 
@@ -1250,6 +1331,8 @@ def main() -> int:
         check("health tools dispatch", lambda: health_tools_dispatch(tmp_path))
         check("sentinel store + tools", lambda: sentinel_store_and_tools(tmp_path))
         check("sentinel briefing composer", lambda: sentinel_briefing_composer(tmp_path))
+        check("conversation store round-trip", lambda: conversation_store_roundtrip(tmp_path))
+        check("conversation tools dispatch", lambda: conversation_tools_dispatch(tmp_path))
         check("watchtower rules + evaluators", lambda: watchtower_rules_and_evaluators(tmp_path))
         check("licensing validation", lambda: licensing_validation(tmp_path))
         check("licensing tier gating", lambda: licensing_tier_gating(tmp_path))

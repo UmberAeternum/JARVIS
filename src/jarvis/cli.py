@@ -20,7 +20,10 @@ from rich.markdown import Markdown
 from rich.panel import Panel
 from rich.prompt import Confirm
 
-from . import __version__, brain, config, licensing, publish, tools
+import time as _time
+from datetime import datetime
+
+from . import __version__, brain, config, conversations, licensing, publish, tools
 from .agent import Agent
 from .wizard import run_wizard
 
@@ -64,13 +67,19 @@ def _rebuild(cfg: config.Config, console: Console, registry: tools.ToolRegistry)
     return agent, status_box
 
 
+def _first_session_title() -> str:
+    return "Session " + datetime.now().strftime("%Y-%m-%d %H:%M")
+
+
 def _execute_turn(
-    agent: Agent, status_box: dict, console: Console, user_text: str | list
+    agent: Agent, status_box: dict, console: Console, user_text: str | list,
+    session_id: int | None = None,
 ) -> str | None:
     """Run one conversational turn with live-streamed reply text.
 
     Returns the reply, or None when the turn was interrupted/failed (the
-    error is already displayed).
+    error is already displayed). When session_id is set, every turn is
+    logged to the local conversation store (the Second Mind).
     """
     streamed = {"text": ""}
 
@@ -79,6 +88,7 @@ def _execute_turn(
         if status_box.get("live") is not None:
             status_box["live"].update(Markdown(streamed["text"]))
 
+    user_content = user_text if isinstance(user_text, str) else str(user_text)
     try:
         with Live(
             Markdown(""),
@@ -88,7 +98,7 @@ def _execute_turn(
         ) as live:
             status_box["live"] = live
             try:
-                return agent.run_turn(user_text, on_text_delta=on_delta)
+                reply = agent.run_turn(user_text, on_text_delta=on_delta)
             finally:
                 status_box["live"] = None
     except KeyboardInterrupt:
@@ -105,6 +115,14 @@ def _execute_turn(
         )
     except Exception as exc:
         console.print(f"[red]Brain error:[/] {type(exc).__name__}: {exc}")
+    else:
+        if session_id is not None and isinstance(user_text, str):
+            try:
+                conversations.log_message(session_id, "user", user_text)
+                conversations.log_message(session_id, "assistant", reply)
+            except Exception:
+                pass  # logging must never break the conversation
+        return reply
     return None
 
 
@@ -168,8 +186,11 @@ def _chat_loop(
         )
     )
     console.print(
-        "[dim]Type a request, or /setup /tools /dryrun /voice /tts /look /live /publish /clear /exit[/]"
+        "[dim]Type a request, or /setup /tools /history /resume N /dryrun /voice /tts /look /live /publish /clear /exit[/]"
     )
+
+    # Mark XV - the Second Mind: every turn of this session is logged locally
+    session_id = conversations.start_session(_first_session_title())
 
     while True:
         prompt = "[bold cyan]you [Enter=speak | type]>[/] " if voice_active else "[bold cyan]you>[/] "
@@ -200,6 +221,37 @@ def _chat_loop(
         if user_text == "/tools":
             for name in registry.descriptions():
                 console.print(f"  - {name}")
+            continue
+        if user_text == "/history":
+            sessions = conversations.list_sessions()
+            if not sessions:
+                console.print("[dim]No sessions recorded yet.[/]")
+            for session in sessions:
+                console.print(
+                    f"  #{session['id']} [{session['started_at']}] "
+                    f"{session['title']} ({session['turns']} turns)"
+                )
+            console.print("[dim]/resume <id> to load a session back into context.[/]")
+            continue
+        if user_text.startswith("/resume"):
+            parts = user_text.split(" ", 1)
+            target = int(parts[1]) if len(parts) > 1 and parts[1].isdigit() else None
+            if target is None:
+                console.print("[yellow]usage: /resume <session id>[/]")
+                continue
+            recorded = conversations.session_messages(target)
+            if not recorded:
+                console.print(f"[yellow]session #{target} has no messages.[/]")
+                continue
+            agent.reset()
+            for entry in recorded:
+                role = entry["role"]
+                if role not in ("user", "assistant"):
+                    continue
+                agent.messages.append({"role": role, "content": entry["content"]})
+            console.print(
+                f"[green]Resumed session #{target} - {len(recorded)} messages back in context, Sir.[/]"
+            )
             continue
         if user_text == "/dryrun":
             registry.set_dry_run(not registry.is_dry_run())
@@ -297,7 +349,7 @@ def _chat_loop(
                 )
             except Exception as exc:
                 console.print(f"[dim](live capture failed: {exc} - sending text only)[/]")
-        reply = _execute_turn(agent, status_box, console, user_text)
+        reply = _execute_turn(agent, status_box, console, user_text, session_id=session_id)
         if reply is None:
             continue
         console.print(Panel(Markdown(reply), title="J.A.R.V.I.S.", border_style="cyan"))

@@ -270,6 +270,7 @@ def default_registry(
     dry_run: bool = False,
     allow_memory: bool = True,
     allow_health: bool = True,
+    allow_history: bool = True,
     allow_sentinel: bool = True,
     allow_watchtower: bool = True,
     allow_screen_control: bool = False,
@@ -376,6 +377,10 @@ def default_registry(
         from .health import register_health_tools
 
         register_health_tools(reg)
+    if allow_history:
+        from .conversations import register_conversation_tools
+
+        register_conversation_tools(reg)
     if allow_sentinel:
         from .sentinel import register_sentinel_tools
 

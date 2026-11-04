@@ -33,6 +33,9 @@ TOOL_CONTRACT = """\
 - Proactively save durable facts about the user, their preferences and their
   environment with memory_save as you learn them; consult memory_search when
   prior context would change your answer.
+- Conversation history tools (history_search, history_sessions) exist: every
+  past session is logged locally. Use history_search when the user refers to
+  something discussed before ("what did I ask about X last week").
 
 [SENTINEL]
 - reminder tools (reminder_set, reminder_list, reminder_cancel) exist; the
