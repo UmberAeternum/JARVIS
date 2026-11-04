@@ -105,7 +105,7 @@ class FakeBrain:
 
 
 def version_string() -> None:
-    expect(__version__ == "3.4.0", __version__)
+    expect(__version__ == "3.5.0", __version__)
 
 
 def registry_built() -> None:
@@ -1622,6 +1622,84 @@ def update_check_offline_and_mocked() -> None:
         licensing.PUBLIC_KEY_B64 = original_key
 
 
+def diagnostics_redaction() -> None:
+    from jarvis.diagnostics import redact_text
+
+    secret = FAKE_KEY
+    lic = "UMBRA-AbCdEfGh.ijklmnop-QRstuvwx123"
+    text = (
+        f"call with Authorization: Bearer {secret} ok; lic {lic}; "
+        "mail boss@corp.example.com; the vault code is 4471"
+    )
+    out = redact_text(text)
+    expect(secret not in out, "api key leaked")
+    expect(lic not in out, "license key leaked")
+    expect("boss@corp.example.com" not in out, "email leaked")
+    expect("4471" in out, "ordinary content must survive redaction")
+    expect("[REDACTED" in out, "placeholder expected")
+
+
+def diagnostics_bundle_and_crash(tmp: Path) -> None:
+    import zipfile
+
+    from jarvis import conversations as conv
+    from jarvis.diagnostics import build_bundle, log_line, write_crash_report
+    from jarvis.memory import save_note
+
+    original = config.config_dir
+    config.config_dir = lambda: tmp / "cfgdiag"
+    try:
+        cfg = config.Config(brains=config.BrainsConfig(
+            primary=config.BrainConfig(type="cloud", provider="zai",
+                                       base_url="https://x/v1", model="m",
+                                       api_key=FAKE_KEY)))
+        cfg.save()
+        save_note("remember the vault code is 4471")
+        sid = conv.start_session("diag session")
+        conv.log_message(sid, "user", f"my key is {FAKE_KEY}")
+        conv.log_message(sid, "user", "the vault code is 4471")
+        conv.log_message(sid, "assistant", "understood, Sir")
+
+        bundle = build_bundle(cfg, include_conversations=False)
+        expect(bundle.exists() and bundle.stat().st_size > 0, "bundle missing")
+        with zipfile.ZipFile(bundle) as zf:
+            names = zf.namelist()
+            joined = "".join(zf.read(n).decode("utf-8", "replace") for n in names)
+        expect("info.txt" in names and "config.txt" in names, f"members: {names}")
+        expect("conversations.txt" not in names, "bodies must be excluded by default")
+        expect(FAKE_KEY not in joined, "API key leaked into the bundle")
+        expect("4471" not in joined, "message body leaked without --include-conversations")
+        expect("diag session" in joined, "session metadata should be included")
+        expect("UMBRA-" not in joined, "license key material leaked into the bundle")
+
+        full = build_bundle(cfg, include_conversations=True)
+        with zipfile.ZipFile(full) as zf:
+            joined_full = "".join(
+                zf.read(n).decode("utf-8", "replace") for n in zf.namelist()
+            )
+        expect("4471" in joined_full, "explicitly included conversations must appear")
+        expect(FAKE_KEY not in joined_full, "redaction must still apply to included bodies")
+
+        # opt-in crash report, redacted, logged
+        cfg.diagnostics.crash_reports = True
+        cfg.save()
+        crash_path = write_crash_report(RuntimeError(f"boom with key {FAKE_KEY}"))
+        expect(crash_path.exists(), "crash file missing")
+        crash_text = crash_path.read_text(encoding="utf-8")
+        expect("RuntimeError" in crash_text and "boom" in crash_text, "crash content")
+        expect(FAKE_KEY not in crash_text, "crash file leaked the key")
+        log_path = config.config_dir() / "logs" / "app.log"
+        expect(log_path.exists(), "app.log should exist after a crash report")
+        log_line("test", f"note {FAKE_KEY}")
+        expect(FAKE_KEY not in log_path.read_text(encoding="utf-8"), "log leaked the key")
+
+        reloaded = config.Config.load()
+        expect(reloaded is not None and reloaded.diagnostics.crash_reports is True,
+               "diagnostics flag not persisted")
+    finally:
+        config.config_dir = original
+
+
 def main() -> int:
     check("version string", version_string)
     check("registry builds with 22 tools", registry_built)
@@ -1671,6 +1749,8 @@ def main() -> int:
     check("setup --yes non-interactive paths", lambda: setup_noninteractive_paths(tmp_path))
     check("update manifest verification", update_manifest_verification)
     check("update check offline + mocked", update_check_offline_and_mocked)
+    check("diagnostics redaction", diagnostics_redaction)
+    check("diagnostics bundle + crash report", lambda: diagnostics_bundle_and_crash(tmp_path))
 
     check("BrainChain failover", chain_failover)
     check("BrainChain non-transient raises", chain_non_transient_raises)

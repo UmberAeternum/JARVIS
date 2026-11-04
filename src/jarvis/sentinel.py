@@ -262,6 +262,12 @@ def run_sentinel(console, interval_s: int = 20, briefing_time: str = "08:00") ->
 
     def announce(text: str) -> None:
         console.print(f"[bold cyan]SENTINEL:[/] {text}")
+        try:
+            from .diagnostics import log_line
+
+            log_line("sentinel", text)
+        except Exception:
+            pass  # logging must never break announcements
         if tts is not None:
             try:
                 tts.say(text)

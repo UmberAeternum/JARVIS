@@ -440,7 +440,7 @@ def _license_command(console: Console, args: list[str]) -> int:
 
 def _startup_update_check(cfg: config.Config, console: Console) -> None:
     """Mark XVII: one quiet background update check. Prints only when a newer
-    release exists; any failure (offline, bad signature) stays silent."""
+    release exists; failures go to the local log (Mark XVIII) without noise."""
     from .updates import check_for_update
 
     result = check_for_update(__version__, cfg.updates.manifest_url)
@@ -449,9 +449,29 @@ def _startup_update_check(cfg: config.Config, console: Console) -> None:
             f"[dim]Update available: [bold]{result['latest']}[/] - {result.get('url', '')} "
             "([bold]jarvis update check[/] for details)[/]"
         )
+    elif "failed" in str(result.get("reason", "")):
+        try:
+            from .diagnostics import log_line
+
+            log_line("update", result["reason"])
+        except Exception:
+            pass
 
 
 def main(argv: list[str] | None = None) -> int:
+    """Entry point with the Mark XVIII opt-in crash-report hook. With
+    diagnostics.crash_reports disabled, behavior is exactly as before."""
+    try:
+        return _dispatch(argv)
+    except (KeyboardInterrupt, SystemExit):
+        raise
+    except Exception as exc:
+        from .diagnostics import maybe_report_crash
+
+        return maybe_report_crash(exc)
+
+
+def _dispatch(argv: list[str] | None = None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
     console = Console()
     if "--version" in argv or "-V" in argv:
@@ -480,6 +500,7 @@ def main(argv: list[str] | None = None) -> int:
             "  setup       run the onboarding wizard (setup --yes for CI)\n"
             "  settings    show | set <key>=<value> | reset [--yes]\n"
             "  update      check - look for a newer signed release\n"
+            "  diagnostics bundle [--include-conversations] - redacted support bundle\n"
             "  license     activate <key> | status - PRO licensing"
         )
         return 0
@@ -546,6 +567,33 @@ def main(argv: list[str] | None = None) -> int:
             )
             return 1
         return run_bridge(console)
+    if argv and argv[0] == "diagnostics":
+        from .diagnostics import build_bundle
+
+        rest = argv[1:]
+        if (rest[0] if rest else "bundle") != "bundle":
+            console.print("usage: jarvis diagnostics bundle [--include-conversations] [--out <file>]")
+            return 1
+        # LITE feature: local support tooling; works even before setup
+        current = config.Config.load() or config.Config()
+        include_conversations = "--include-conversations" in rest
+        out_path: Path | None = None
+        if "--out" in rest:
+            index = rest.index("--out")
+            if index + 1 < len(rest):
+                out_path = Path(rest[index + 1])
+        bundle_path = build_bundle(current, include_conversations=include_conversations, out=out_path)
+        console.print(
+            Panel(
+                f"[green]Diagnostics bundle written:[/] {bundle_path}\n\n"
+                "Redacted: no API keys, no license key, no message bodies\n"
+                "(unless --include-conversations was passed - even then every\n"
+                "line is scrubbed). Attach this file when requesting support.",
+                title="DIAGNOSTICS",
+                border_style="cyan",
+            )
+        )
+        return 0
     if argv and argv[0] == "update":
         from .updates import check_for_update
 

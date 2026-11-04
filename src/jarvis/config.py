@@ -114,6 +114,13 @@ class UpdatesConfig:
 
 
 @dataclass
+class DiagnosticsConfig:
+    """Mark XVIII: local support tooling. Crash reporting is opt-in."""
+
+    crash_reports: bool = False  # write a local crash file on unhandled errors
+
+
+@dataclass
 class Config:
     version: int = 4
     brains: BrainsConfig = field(default_factory=BrainsConfig)
@@ -123,6 +130,7 @@ class Config:
     voice: VoiceConfig = field(default_factory=VoiceConfig)
     vision: VisionConfig = field(default_factory=VisionConfig)
     updates: UpdatesConfig = field(default_factory=UpdatesConfig)
+    diagnostics: DiagnosticsConfig = field(default_factory=DiagnosticsConfig)
     created_at: str = ""
     updated_at: str = ""
 
@@ -173,6 +181,9 @@ class Config:
             "updates": {
                 "check_on_start": self.updates.check_on_start,
                 "manifest_url": self.updates.manifest_url,
+            },
+            "diagnostics": {
+                "crash_reports": self.diagnostics.crash_reports,
             },
             "created_at": self.created_at,
             "updated_at": self.updated_at,
@@ -245,6 +256,11 @@ class Config:
         return UpdatesConfig(**{k: v for k, v in (raw or {}).items() if k in known})
 
     @classmethod
+    def _diagnostics_from(cls, raw: dict | None) -> DiagnosticsConfig:
+        known = {f.name for f in fields(DiagnosticsConfig)}
+        return DiagnosticsConfig(**{k: v for k, v in (raw or {}).items() if k in known})
+
+    @classmethod
     def _from_modern(cls, raw: dict) -> "Config":
         """v2/v3/v4 share every key except voice and vision (defaults fill in)."""
         use_keyring = bool(raw.get("use_keyring", False))
@@ -257,6 +273,7 @@ class Config:
             voice=cls._voice_from(raw.get("voice")),
             vision=cls._vision_from(raw.get("vision")),
             updates=cls._updates_from(raw.get("updates")),
+            diagnostics=cls._diagnostics_from(raw.get("diagnostics")),
             created_at=raw.get("created_at", ""),
             updated_at=raw.get("updated_at", ""),
         )

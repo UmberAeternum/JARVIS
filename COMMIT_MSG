@@ -1,23 +1,26 @@
-Mark XVII: update checker (signed manifest, report-only)
+Mark XVIII: diagnostics bundle + opt-in crash reporting
 
-- updates.py: fetches a signed update manifest through the SSRF-guarded
-  fetcher (size-capped, timeout added to guarded_fetch_bytes with the old
-  default preserved), verifies its Ed25519 signature with the same public
-  key that validates PRO licenses, and reports a newer release with notes
-  and the download URL. Nothing is ever downloaded or installed
-  automatically. Every failure mode returns a reason - offline-safe, no
-  crash, no hang (4s timeout).
-- Signature scheme: Ed25519 over the canonical JSON serialization of the
-  manifest payload (sort_keys + tight separators); formatting differences
-  on the wire cannot confuse verification. PRO-channel releases and the
-  pro_url asset are surfaced only to PRO tiers.
-- jarvis update check prints the result; a quiet background check runs on
-  chat startup (daemon thread, opt-out via
-  jarvis settings set updates.check_on_start=false).
-- config: additive UpdatesConfig section (check_on_start, manifest_url) -
-  schema stays v4, older configs load with defaults.
-- Tests: signature verification (valid, tampered payload, tampered
-  signature, malformed), version comparison (numeric-aware, v-prefix),
-  offline fetch failure, mocked manifest round-trip, LITE pro_url hiding,
-  non-JSON refusal. No network in tests (fetch is monkeypatched).
-- Version 3.4.0.
+- jarvis diagnostics bundle [--include-conversations] [--out <file>]
+  writes a zip locally: version/OS/Python, license TIER (never the key),
+  a redacted settings dump, the tail of logs/app.log, and conversation
+  METADATA (ids/titles/turns/started_at). Message bodies are excluded
+  unless --include-conversations is passed - and even then every line
+  goes through the redactor and the transcript is size-capped. License
+  key material never enters the bundle. LITE feature; works before setup.
+- diagnostics.py: redact_text scrubs license keys, API key shapes
+  (sk-/ghp-/xoxp-/AIza/Bearer headers), and emails; log_line appends
+  redacted, size-capped lines to logs/app.log (wired into the sentinel
+  announcer, background update failures, crash reports, and bundle
+  creation); write_crash_report writes a redacted local crash file.
+- Crash reporting is strictly opt-in (diagnostics.crash_reports, default
+  off): cli.main wraps the dispatch and on an unhandled exception either
+  writes the local crash file + prints instructions (opt-in) or preserves
+  the previous behavior exactly by re-raising (opt-out). Nothing is ever
+  uploaded.
+- config: additive DiagnosticsConfig section; schema stays v4; settings
+  show/set cover diagnostics.crash_reports.
+- Tests: redaction (keys, license, emails; ordinary content survives);
+  bundle contents (members present, no key, no bodies by default,
+  metadata included, bodies + redaction with --include-conversations);
+  crash file + log redaction; flag persistence.
+- Version 3.5.0.

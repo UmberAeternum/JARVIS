@@ -59,6 +59,7 @@ Keys are Ed25519-signed by the publisher — they cannot be forged, and they nev
 | Portal (WebXR room for headsets) | `jarvis portal` |
 | Sentinel (proactive daemon) | `jarvis sentinel` |
 | The Oracle (health report) | `jarvis health` |
+| Diagnostics (redacted support bundle) | `jarvis diagnostics bundle` |
 
 ## Security model
 
@@ -69,7 +70,7 @@ Keys are Ed25519-signed by the publisher — they cannot be forged, and they nev
 
 ## Privacy
 
-Local-first: license, memories, health samples, reminders and voice transcription are stored on your device. Only your AI-provider traffic leaves the machine, using your own key.
+Local-first: license, memories, health samples, reminders and voice transcription are stored on your device. Only your AI-provider traffic leaves the machine, using your own key. Diagnostics bundles are built locally and fully redacted (no keys, no message bodies unless you explicitly pass `--include-conversations`); crash reports are opt-in (`jarvis settings set diagnostics.crash_reports=true`) and never leave the machine.
 
 ## Health disclaimer
 

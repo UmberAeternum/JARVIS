@@ -35,6 +35,7 @@ SETTABLE: tuple[str, ...] = (
     "vision.screen_control",
     "updates.check_on_start",
     "updates.manifest_url",
+    "diagnostics.crash_reports",
     "max_tool_iterations",
     "max_tokens_per_turn",
     "use_keyring",
@@ -117,6 +118,7 @@ def show_text(cfg: config.Config) -> str:
         f"updates: check_on_start={cfg.updates.check_on_start}"
         + (f" manifest_url={cfg.updates.manifest_url}" if cfg.updates.manifest_url else "")
     )
+    lines.append(f"diagnostics: crash_reports={cfg.diagnostics.crash_reports}")
     lines.append(f"config file: {config.config_path()}")
     return "\n".join(lines)
 
