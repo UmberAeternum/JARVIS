@@ -357,7 +357,8 @@ def main(argv: list[str] | None = None) -> int:
             "  health      the Oracle: HR/HRV screening report\n"
             "  sentinel    the Sentinel: reminders + morning briefing daemon\n"
             "  face        the Avatar: local web face + chat (Mark VI)\n"
-            "  portal      the Portal: WebXR room for headsets (Mark VII)"
+            "  portal      the Portal: WebXR room for headsets (Mark VII)\n"
+            "  serve       the Bridge: full agent over the LAN (Mark IX)"
         )
         return 0
     if argv and argv[0] == "watch":
@@ -399,6 +400,16 @@ def main(argv: list[str] | None = None) -> int:
             )
             return 1
         return run_portal(console)
+    if argv and argv[0] == "serve":
+        from .serve import run_bridge
+
+        if config.Config.load() is None:
+            console.print(
+                "[yellow]No brain configured yet.[/] Run [bold]python -m jarvis[/] "
+                "once and complete the wizard - the bridge exposes that brain."
+            )
+            return 1
+        return run_bridge(console)
 
     dry_run = "--dry-run" in argv
     voice_requested = "--voice" in argv

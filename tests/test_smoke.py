@@ -12,6 +12,7 @@ import json
 import os
 import sys
 import tempfile
+import time
 import types
 from pathlib import Path
 
@@ -101,7 +102,7 @@ class FakeBrain:
 
 
 def version_string() -> None:
-    expect(__version__ == "1.8.0", __version__)
+    expect(__version__ == "2.0.0", __version__)
 
 
 def registry_built() -> None:
@@ -500,6 +501,142 @@ def sentinel_briefing_composer(tmp: Path) -> None:
         expect("Recent memory" in report, "memory recap missing")
     finally:
         config.config_dir = original
+
+
+def bridge_confirm_and_events(tmp: Path) -> None:
+    from http.client import HTTPConnection
+
+    from jarvis.serve import PAGE_BRIDGE, BridgeState, start_server
+
+    expect("APPROVE" in PAGE_BRIDGE and "DENY" in PAGE_BRIDGE, "page confirm buttons missing")
+    expect("/api/events" in PAGE_BRIDGE and "/api/command" in PAGE_BRIDGE, "page endpoints missing")
+    expect("127.0.0.1" not in PAGE_BRIDGE, "page must not hardcode the host")
+
+    tool_responses = iter([
+        FakeResp(FakeMsg("", tool_calls=[fake_tool_call("t1", "bridge_gated", "{}")])),
+        FakeResp(FakeMsg("gated action complete, Sir")),
+    ])
+    chain = types.SimpleNamespace(create_chat=lambda **kwargs: next(tool_responses))
+    state = BridgeState(config.Config(), "testtoken456", confirm_timeout=5.0)
+    state.agent.chain = chain  # route the agent through the fake responses
+
+    def gated_action() -> str:
+        return "ran" if state.confirm("Run the gated test action?") else "BLOCKED"
+
+    state.registry.register(
+        "bridge_gated",
+        "A test tool that always requires confirmation.",
+        {"type": "object", "properties": {}},
+        gated_action,
+    )
+
+    server, port, thread = start_server(state, preferred_port=18782)
+    try:
+        connection = HTTPConnection("127.0.0.1", port, timeout=10)
+
+        connection.request("GET", "/")
+        tokenless = connection.getresponse()
+        expect(tokenless.status == 403, "gate must deny tokenless requests")
+        tokenless.read()
+
+        connection.request("GET", "/?t=testtoken456")
+        response = connection.getresponse()
+        expect(response.status == 200, "token page should load")
+        response.read()
+
+        connection.request(
+            "POST", "/api/command",
+            body=json.dumps({"text": "run the gated thing"}),
+            headers={"X-Jarvis-Token": "testtoken456", "Content-Type": "application/json"},
+        )
+        started = json.loads(connection.getresponse().read().decode("utf-8"))
+        expect(started.get("started") is True, f"expected started, got: {started}")
+
+        # the turn thread should emit a confirm_request; approve it remotely
+        deadline = time.time() + 10
+        confirm_id = None
+        while time.time() < deadline and confirm_id is None:
+            connection.request("GET", "/api/events?since=1",
+                               headers={"X-Jarvis-Token": "testtoken456"})
+            data = json.loads(connection.getresponse().read().decode("utf-8"))
+            for event in data["events"]:
+                if event["type"] == "confirm_request":
+                    confirm_id = event["confirm_id"]
+            if confirm_id is None:
+                time.sleep(0.2)
+        expect(confirm_id is not None, "no confirm_request event arrived")
+
+        connection.request(
+            "POST", "/api/confirm",
+            body=json.dumps({"confirm_id": confirm_id, "approved": True}),
+            headers={"X-Jarvis-Token": "testtoken456", "Content-Type": "application/json"},
+        )
+        confirm_response = connection.getresponse()
+        expect(confirm_response.status == 200, "confirm answer should be accepted")
+        confirm_response.read()
+
+        deadline = time.time() + 10
+        reply = None
+        while time.time() < deadline and reply is None:
+            connection.request("GET", f"/api/events?since=1",
+                               headers={"X-Jarvis-Token": "testtoken456"})
+            data = json.loads(connection.getresponse().read().decode("utf-8"))
+            for event in data["events"]:
+                if event["type"] == "reply":
+                    reply = event["text"]
+            if reply is None:
+                time.sleep(0.2)
+        expect(reply == "gated action complete, Sir", f"unexpected reply: {reply}")
+
+        # denial path: a new turn, this time refused remotely
+        since = state.events[-1]["id"]
+        tool_responses2 = iter([
+            FakeResp(FakeMsg("", tool_calls=[fake_tool_call("t2", "bridge_gated", "{}")])),
+            FakeResp(FakeMsg("BLOCKED - the user refused, Sir.")),
+        ])
+        state.agent.chain = types.SimpleNamespace(create_chat=lambda **kw: next(tool_responses2))
+        connection.request(
+            "POST", "/api/command",
+            body=json.dumps({"text": "try again"}),
+            headers={"X-Jarvis-Token": "testtoken456", "Content-Type": "application/json"},
+        )
+        deny_started = json.loads(connection.getresponse().read().decode("utf-8"))
+        expect(deny_started.get("started") is True, f"expected started, got: {deny_started}")
+        deadline = time.time() + 10
+        deny_id = None
+        while time.time() < deadline and deny_id is None:
+            connection.request("GET", f"/api/events?since={since}",
+                               headers={"X-Jarvis-Token": "testtoken456"})
+            data = json.loads(connection.getresponse().read().decode("utf-8"))
+            for event in data["events"]:
+                if event["type"] == "confirm_request":
+                    deny_id = event["confirm_id"]
+            if deny_id is None:
+                time.sleep(0.2)
+        expect(deny_id is not None, "second confirm_request missing")
+        connection.request(
+            "POST", "/api/confirm",
+            body=json.dumps({"confirm_id": deny_id, "approved": False}),
+            headers={"X-Jarvis-Token": "testtoken456", "Content-Type": "application/json"},
+        )
+        connection.getresponse().read()
+        deadline = time.time() + 10
+        blocked_seen = False
+        while time.time() < deadline and not blocked_seen:
+            connection.request("GET", f"/api/events?since={since}",
+                               headers={"X-Jarvis-Token": "testtoken456"})
+            data = json.loads(connection.getresponse().read().decode("utf-8"))
+            for event in data["events"]:
+                if event["type"] == "reply" and "BLOCKED" in event["text"]:
+                    blocked_seen = True
+            if not blocked_seen:
+                time.sleep(0.2)
+        expect(blocked_seen, "denied gate should yield a BLOCKED reply")
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5)
+    expect(not thread.is_alive(), "server thread should stop")
 
 
 def system_prompt_content() -> None:
@@ -964,6 +1101,8 @@ def main() -> int:
         check("sentinel briefing composer", lambda: sentinel_briefing_composer(tmp_path))
         check("avatar server round-trip", lambda: avatar_server_roundtrip(tmp_path))
         check("portal server round-trip", lambda: portal_server_roundtrip(tmp_path))
+        check("bridge confirm + events", lambda: bridge_confirm_and_events(tmp_path))
+        check("bridge confirm + events", lambda: bridge_confirm_and_events(tmp_path))
 
     check("BrainChain failover", chain_failover)
     check("BrainChain non-transient raises", chain_non_transient_raises)

@@ -31,6 +31,7 @@ Works with a **cloud brain** (Z.AI GLM, OpenAI, Google Gemini, or any OpenAI-com
 | **Avatar (Mark VI)** | `jarvis face` — a local web face with lip-synced spoken replies; bring your own VRM model for full 3D |
 | **Portal (Mark VII)** | `jarvis portal` — a WebXR room for headsets and phones: JARVIS chat panel floating in your space, a kanban wall you cycle by pinch/trigger, your GLB models on a desk |
 | **Sentinel (Mark VIII)** | Reminders and a spoken morning briefing (health + kanban + memory) from a standalone local daemon — it initiates, needs no key, announces only |
+| **Bridge (Mark IX)** | `jarvis serve` — the **full agent over your LAN**: command the desktop from your phone, tool log streaming live, confirmations delivered as APPROVE/DENY buttons |
 
 ## Install
 
@@ -186,6 +187,19 @@ The assistant finally **initiates**: a standalone local daemon that fires persis
 - **Announces only, by design**: no tool execution happens while you're away from the confirmation gates
 - Briefing sources are the same local stores: `health.db`, `board.json`, `memory.db`
 
+## Bridge — the desktop, from anywhere on your network (Mark IX)
+
+```bash
+jarvis serve
+```
+
+A token-gated LAN server exposing the **full agent** — every tool, confirmation gates included:
+
+- Open the printed URL on your phone: chat with the desktop brain, watch the tool log stream live
+- When a gated action is requested, the phone shows **APPROVE / DENY** — the confirmation gate survives the network hop (120 s timeout = denied, reported honestly)
+- One turn at a time; the same denylist, budgets, and sandbox rules apply remotely
+- The Android launcher is the native face of this link
+
 ## Security model
 
 - **Bring your own key.** No API key ships with this software — anyone who hardcodes a shared key into a public repo gets it drained within hours.
@@ -239,6 +253,7 @@ src/jarvis/
 - [x] Health: HR/HRV screening against your own baseline (the Oracle)
 - [x] Portal: WebXR room for headsets (chat panel, kanban wall, desk models)
 - [x] Sentinel: reminders, morning briefing, proactive layer
+- [x] Bridge: the full agent over the LAN with remote confirmations
 - [ ] Multi-monitor vision, clipboard paste for non-ASCII typing, wake-word tuning UI
 
 ## License

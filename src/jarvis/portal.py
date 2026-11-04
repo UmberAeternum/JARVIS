@@ -44,7 +44,7 @@ KANBAN_DEFAULT = {"tasks": [{"id": 1, "column": "todo", "text": "Welcome to the 
 COLUMNS = ("todo", "doing", "done")
 
 
-def _lan_address() -> str:
+def lan_address() -> str:
     """Best-effort LAN address of this machine (for the printed URL)."""
     try:
         hostname = socket.gethostname()
@@ -265,7 +265,7 @@ def run_portal(console) -> int:  # pragma: no cover - interactive loop
         console.print(f"[red]{exc}[/]")
         return 1
 
-    address = _lan_address()
+    address = lan_address()
     url = f"http://{address}:{port}/?t={token}"
     console.print(
         Panel(
