@@ -158,7 +158,9 @@ def guarded_fetch_json(url: str, allow_local: bool = False, timeout: float = 3.0
         return json.loads(resp.read().decode("utf-8"))
 
 
-def guarded_fetch_bytes(url: str, max_bytes: int, allow_local: bool = False) -> tuple[bytes | None, str]:
+def guarded_fetch_bytes(
+    url: str, max_bytes: int, allow_local: bool = False, timeout: float = 120.0
+) -> tuple[bytes | None, str]:
     """Fetch raw bytes with the full SSRF rule applied. No file I/O here.
 
     Scheme + host + resolved-IP verification (anti DNS-rebinding), redirect
@@ -178,7 +180,7 @@ def guarded_fetch_bytes(url: str, max_bytes: int, allow_local: bool = False) -> 
             return None, f"host {host!r} resolves to a forbidden address ({addr})"
     request = Request(url, headers={"User-Agent": "jarvis"})
     try:
-        with build_opener(_NoRedirects).open(request, timeout=120) as resp:  # noqa: S310 - validated above
+        with build_opener(_NoRedirects).open(request, timeout=timeout) as resp:  # noqa: S310 - validated above
             if getattr(resp, "status", 200) != 200:
                 return None, f"unexpected status {resp.status}"
             data = b""

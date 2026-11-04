@@ -105,7 +105,7 @@ class FakeBrain:
 
 
 def version_string() -> None:
-    expect(__version__ == "3.3.0", __version__)
+    expect(__version__ == "3.4.0", __version__)
 
 
 def registry_built() -> None:
@@ -1524,6 +1524,104 @@ def setup_noninteractive_paths(tmp: Path) -> None:
         config.config_dir = original
 
 
+def update_manifest_verification() -> None:
+    import base64
+
+    from cryptography.hazmat.primitives import serialization
+
+    from jarvis import licensing, updates as upd
+
+    signer = Ed25519PrivateKey.generate()
+    original = licensing.PUBLIC_KEY_B64
+    licensing.PUBLIC_KEY_B64 = base64.b64encode(
+        signer.public_key().public_bytes(
+            serialization.Encoding.Raw, serialization.PublicFormat.Raw
+        )
+    ).decode()
+    try:
+        payload = {"version": "3.4.0", "channel": "stable",
+                   "notes": "n", "url": "https://example.com/r"}
+        manifest = {
+            "payload": payload,
+            "signature": base64.b64encode(
+                signer.sign(upd.canonical_payload_bytes(payload))
+            ).decode(),
+        }
+        expect(upd.verify_manifest(manifest), "valid signed manifest must verify")
+        expect(upd.is_newer("3.3.0", "3.4.0"), "is_newer")
+        expect(not upd.is_newer("3.4.0", "3.4.0"), "same version is not newer")
+        expect(not upd.is_newer("3.4.0", "3.3.9"), "older version is not newer")
+        expect(upd.is_newer("3.3.0", "v3.10.0"), "leading v + numeric-aware compare")
+
+        tampered_payload = dict(manifest)
+        tampered_payload["payload"] = dict(payload, version="9.9.9")
+        expect(not upd.verify_manifest(tampered_payload), "tampered payload must fail")
+
+        tampered_sig = dict(manifest, signature=manifest["signature"][:-4] + "AAAA")
+        expect(not upd.verify_manifest(tampered_sig), "tampered signature must fail")
+
+        expect(not upd.verify_manifest({}), "empty manifest must fail")
+        expect(not upd.verify_manifest({"payload": {"version": "1"}}), "missing signature must fail")
+    finally:
+        licensing.PUBLIC_KEY_B64 = original
+
+
+def update_check_offline_and_mocked() -> None:
+    from jarvis import licensing, safety, updates as upd
+
+    original_fetch = safety.guarded_fetch_bytes
+    original_key = licensing.PUBLIC_KEY_B64
+    try:
+        # offline-safe: any fetch failure becomes a reason, never an exception
+        def _offline(*_args, **_kwargs):
+            raise OSError("offline")
+
+        safety.guarded_fetch_bytes = _offline
+        result = upd.check_for_update("3.3.0",
+                                      manifest_url="https://example.invalid/m.json",
+                                      timeout=0.1)
+        expect(result["update_available"] is False and "failed" in result["reason"], result)
+
+        import base64
+
+        from cryptography.hazmat.primitives import serialization
+
+        signer = Ed25519PrivateKey.generate()
+        licensing.PUBLIC_KEY_B64 = base64.b64encode(
+            signer.public_key().public_bytes(
+                serialization.Encoding.Raw, serialization.PublicFormat.Raw
+            )
+        ).decode()
+        payload = {"version": "9.9.9", "notes": "big release", "url": "https://example.com/r/9"}
+        manifest = {
+            "payload": payload,
+            "signature": base64.b64encode(
+                signer.sign(upd.canonical_payload_bytes(payload))
+            ).decode(),
+        }
+        safety.guarded_fetch_bytes = lambda *a, **kw: (json.dumps(manifest).encode(), "")
+        result = upd.check_for_update("3.3.0", manifest_url="https://example.com/m.json")
+        expect(result["update_available"] is True and result["latest"] == "9.9.9", result)
+        expect(result["notes"] == "big release" and result["url"] == "https://example.com/r/9", result)
+        expect("pro_url" not in result, "LITE must not see the PRO asset url")
+
+        result2 = upd.check_for_update("9.9.9")
+        expect(result2["update_available"] is False and "up to date" in result2["reason"], result2)
+
+        # a manifest served without a valid signature must be refused
+        safety.guarded_fetch_bytes = lambda *a, **kw: (b'{"payload": {"version": "9.9.9"}, "signature": "AAAA"}', "")
+        result3 = upd.check_for_update("3.3.0")
+        expect(result3["update_available"] is False and "signature" in result3["reason"], result3)
+
+        # non-JSON garbage must be refused, not crash
+        safety.guarded_fetch_bytes = lambda *a, **kw: (b"<html>nope</html>", "")
+        result4 = upd.check_for_update("3.3.0")
+        expect(result4["update_available"] is False and "JSON" in result4["reason"], result4)
+    finally:
+        safety.guarded_fetch_bytes = original_fetch
+        licensing.PUBLIC_KEY_B64 = original_key
+
+
 def main() -> int:
     check("version string", version_string)
     check("registry builds with 22 tools", registry_built)
@@ -1569,8 +1667,10 @@ def main() -> int:
         check("portal server round-trip", lambda: portal_server_roundtrip(tmp_path))
         check("bridge confirm + events", lambda: bridge_confirm_and_events(tmp_path))
         check("dashboard server round-trip", lambda: dashboard_server_roundtrip(tmp_path))
-        check("settings apply + redaction", lambda: settings_apply_and_redact(tmp_path))
-        check("setup --yes non-interactive paths", lambda: setup_noninteractive_paths(tmp_path))
+    check("settings apply + redaction", lambda: settings_apply_and_redact(tmp_path))
+    check("setup --yes non-interactive paths", lambda: setup_noninteractive_paths(tmp_path))
+    check("update manifest verification", update_manifest_verification)
+    check("update check offline + mocked", update_check_offline_and_mocked)
 
     check("BrainChain failover", chain_failover)
     check("BrainChain non-transient raises", chain_non_transient_raises)

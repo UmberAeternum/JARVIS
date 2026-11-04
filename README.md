@@ -33,7 +33,7 @@ pip install .
 umbra        # or: python -m jarvis
 ```
 
-The setup wizard walks you through the brain: pick a provider, paste your API key (validated live), optional voice, optional PRO activation — done. Re-run it any time with `jarvis setup` (non-interactive for CI: `jarvis setup --yes --provider zai --api-key ...`, or `--local` for Ollama). Inspect or change settings later with `jarvis settings show | set <key>=<value> | reset`. Keys and all data stay on your machine.
+The setup wizard walks you through the brain: pick a provider, paste your API key (validated live), optional voice, optional PRO activation — done. Re-run it any time with `jarvis setup` (non-interactive for CI: `jarvis setup --yes --provider zai --api-key ...`, or `--local` for Ollama). Inspect or change settings later with `jarvis settings show | set <key>=<value> | reset`. Updates: `jarvis update check` verifies a signed release manifest and prints release notes + URL — report-only, nothing is ever auto-installed (disable the startup check with `jarvis settings set updates.check_on_start=false`). Keys and all data stay on your machine.
 
 Optional extras: `pip install ".[all]"` — voice, vision, screen control deps, keychain storage.
 

@@ -106,6 +106,14 @@ class VisionConfig:
 
 
 @dataclass
+class UpdatesConfig:
+    """Mark XVII: the update checker. The background check is opt-out."""
+
+    check_on_start: bool = True
+    manifest_url: str = ""  # empty = the default signed-manifest URL
+
+
+@dataclass
 class Config:
     version: int = 4
     brains: BrainsConfig = field(default_factory=BrainsConfig)
@@ -114,6 +122,7 @@ class Config:
     max_tokens_per_turn: int = 100_000
     voice: VoiceConfig = field(default_factory=VoiceConfig)
     vision: VisionConfig = field(default_factory=VisionConfig)
+    updates: UpdatesConfig = field(default_factory=UpdatesConfig)
     created_at: str = ""
     updated_at: str = ""
 
@@ -160,6 +169,10 @@ class Config:
                 "max_width": self.vision.max_width,
                 "monitor": self.vision.monitor,
                 "screen_control": self.vision.screen_control,
+            },
+            "updates": {
+                "check_on_start": self.updates.check_on_start,
+                "manifest_url": self.updates.manifest_url,
             },
             "created_at": self.created_at,
             "updated_at": self.updated_at,
@@ -227,6 +240,11 @@ class Config:
         return VisionConfig(**{k: v for k, v in (raw or {}).items() if k in known})
 
     @classmethod
+    def _updates_from(cls, raw: dict | None) -> UpdatesConfig:
+        known = {f.name for f in fields(UpdatesConfig)}
+        return UpdatesConfig(**{k: v for k, v in (raw or {}).items() if k in known})
+
+    @classmethod
     def _from_modern(cls, raw: dict) -> "Config":
         """v2/v3/v4 share every key except voice and vision (defaults fill in)."""
         use_keyring = bool(raw.get("use_keyring", False))
@@ -238,6 +256,7 @@ class Config:
             max_tokens_per_turn=int(raw.get("max_tokens_per_turn", 100_000)),
             voice=cls._voice_from(raw.get("voice")),
             vision=cls._vision_from(raw.get("vision")),
+            updates=cls._updates_from(raw.get("updates")),
             created_at=raw.get("created_at", ""),
             updated_at=raw.get("updated_at", ""),
         )

@@ -12,6 +12,7 @@ Launch flags: --voice, --live, --dry-run.
 from __future__ import annotations
 
 import sys
+import threading
 from pathlib import Path
 
 from rich.console import Console
@@ -437,6 +438,19 @@ def _license_command(console: Console, args: list[str]) -> int:
     return 1
 
 
+def _startup_update_check(cfg: config.Config, console: Console) -> None:
+    """Mark XVII: one quiet background update check. Prints only when a newer
+    release exists; any failure (offline, bad signature) stays silent."""
+    from .updates import check_for_update
+
+    result = check_for_update(__version__, cfg.updates.manifest_url)
+    if result.get("update_available"):
+        console.print(
+            f"[dim]Update available: [bold]{result['latest']}[/] - {result.get('url', '')} "
+            "([bold]jarvis update check[/] for details)[/]"
+        )
+
+
 def main(argv: list[str] | None = None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
     console = Console()
@@ -465,6 +479,7 @@ def main(argv: list[str] | None = None) -> int:
             "  dashboard   the Mission Control: local web dashboard\n"
             "  setup       run the onboarding wizard (setup --yes for CI)\n"
             "  settings    show | set <key>=<value> | reset [--yes]\n"
+            "  update      check - look for a newer signed release\n"
             "  license     activate <key> | status - PRO licensing"
         )
         return 0
@@ -531,6 +546,37 @@ def main(argv: list[str] | None = None) -> int:
             )
             return 1
         return run_bridge(console)
+    if argv and argv[0] == "update":
+        from .updates import check_for_update
+
+        if (argv[1] if len(argv) > 1 else "check") != "check":
+            console.print("usage: jarvis update check")
+            return 1
+        # LITE feature: report-only, nothing is ever downloaded automatically
+        result = check_for_update(__version__)
+        if result.get("update_available"):
+            lines = [
+                f"A new version is available: [bold cyan]{result['latest']}[/] "
+                f"(you are on {__version__})",
+            ]
+            if result.get("notes"):
+                lines += ["", result["notes"]]
+            lines += [
+                "",
+                f"Release: {result.get('url', '(no url)')}",
+            ]
+            if result.get("pro_url"):
+                lines.append(f"PRO asset: {result['pro_url']}")
+            lines += [
+                "",
+                "Upgrade: [bold]pip install --upgrade jarvis-ai[/] or fetch it from the release page.",
+            ]
+            console.print(Panel("\n".join(lines), title="UPDATE AVAILABLE", border_style="amber"))
+        else:
+            console.print(
+                f"[dim]Update check: {result.get('reason', 'no update')} (current: {__version__})[/]"
+            )
+        return 0
     if argv and argv[0] == "setup":
         from .wizard import run_wizard, setup_noninteractive
 
@@ -606,6 +652,11 @@ def main(argv: list[str] | None = None) -> int:
     cfg = config.Config.load()
     if cfg is None:
         cfg = run_wizard(console)
+    # Mark XVII: quiet background update check (opt-out via settings)
+    if cfg.updates.check_on_start:
+        threading.Thread(
+            target=_startup_update_check, args=(cfg, console), daemon=True
+        ).start()
     _chat_loop(
         cfg, console, dry_run=dry_run, voice_requested=voice_requested,
         live_requested=live_requested,

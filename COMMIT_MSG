@@ -1,18 +1,23 @@
-Mark XVI: onboarding wizard + settings
+Mark XVII: update checker (signed manifest, report-only)
 
-- jarvis setup runs the onboarding wizard on demand (the wizard already
-  auto-triggers on first run). setup --yes is a non-interactive CI path:
-  --local, --provider, --model, --base-url; the key comes from --api-key
-  or the UMBRA_API_KEY env var; live key validation is skipped; secrets
-  are never echoed (masked only).
-- The wizard gains an optional voice step and an optional PRO license
-  activation step at the end of onboarding.
-- jarvis settings show (redacted dump - keys masked, license key never
-  printed), set <key>=<value> (strict dotted whitelist; brains.fallback.*
-  materializes a fallback brain; secrets masked in the confirmation),
-  reset [--yes] (wipes brain settings only - memories, health data and
-  the license key are kept).
-- settings.py holds pure helpers (apply_setting, show_text, reset_config)
-  so the CLI stays thin; tests cover redaction, type coercion, whitelist
-  refusal, and all non-interactive paths.
-- Version 3.3.0.
+- updates.py: fetches a signed update manifest through the SSRF-guarded
+  fetcher (size-capped, timeout added to guarded_fetch_bytes with the old
+  default preserved), verifies its Ed25519 signature with the same public
+  key that validates PRO licenses, and reports a newer release with notes
+  and the download URL. Nothing is ever downloaded or installed
+  automatically. Every failure mode returns a reason - offline-safe, no
+  crash, no hang (4s timeout).
+- Signature scheme: Ed25519 over the canonical JSON serialization of the
+  manifest payload (sort_keys + tight separators); formatting differences
+  on the wire cannot confuse verification. PRO-channel releases and the
+  pro_url asset are surfaced only to PRO tiers.
+- jarvis update check prints the result; a quiet background check runs on
+  chat startup (daemon thread, opt-out via
+  jarvis settings set updates.check_on_start=false).
+- config: additive UpdatesConfig section (check_on_start, manifest_url) -
+  schema stays v4, older configs load with defaults.
+- Tests: signature verification (valid, tampered payload, tampered
+  signature, malformed), version comparison (numeric-aware, v-prefix),
+  offline fetch failure, mocked manifest round-trip, LITE pro_url hiding,
+  non-JSON refusal. No network in tests (fetch is monkeypatched).
+- Version 3.4.0.
