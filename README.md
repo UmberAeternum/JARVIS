@@ -31,7 +31,7 @@ Works with a **cloud brain** (Z.AI GLM, OpenAI, Google Gemini, or any OpenAI-com
 | **Avatar (Mark VI)** | `jarvis face` — a local web face with lip-synced spoken replies; bring your own VRM model for full 3D |
 | **Portal (Mark VII)** | `jarvis portal` — a WebXR room for headsets and phones: JARVIS chat panel floating in your space, a kanban wall you cycle by pinch/trigger, your GLB models on a desk |
 | **Sentinel (Mark VIII)** | Reminders and a spoken morning briefing (health + kanban + memory) from a standalone local daemon — it initiates, needs no key, announces only |
-| **Bridge (Mark IX)** | `jarvis serve` — the **full agent over your LAN**: command the desktop from your phone, tool log streaming live, confirmations delivered as APPROVE/DENY buttons |
+| **Bridge (Mark IX)** | `jarvis serve` — the **full agent over your LAN**: command the desktop from your phone, tool log streaming live, confirmations delivered as APPROVE/DENY buttons — and the [launcher](https://github.com/UmberAeternum/jarvis-launcher) connects to it natively (DESK ⌁) |
 
 ## Install
 

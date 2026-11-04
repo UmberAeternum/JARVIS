@@ -102,7 +102,7 @@ class FakeBrain:
 
 
 def version_string() -> None:
-    expect(__version__ == "2.0.0", __version__)
+    expect(__version__ == "2.1.0", __version__)
 
 
 def registry_built() -> None:
@@ -147,6 +147,8 @@ def screen_tools_gated(tmp: Path) -> None:
     reg = default_registry(confirm=lambda d: False, allow_screen_control=True)
     # auto-deny registry: every real action must be blocked
     out = reg.dispatch("screen_click", json.dumps({"x": 100, "y": 200}))
+    expect(out.startswith("BLOCKED"), f"expected BLOCKED, got: {out}")
+    out = reg.dispatch("screen_type", json.dumps({"text": "héllo", "paste": True}))
     expect(out.startswith("BLOCKED"), f"expected BLOCKED, got: {out}")
     # invalid coordinates fail before the gate and before pyautogui is touched
     out = reg.dispatch("screen_click", json.dumps({"x": 999999, "y": -5}))

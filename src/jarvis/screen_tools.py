@@ -45,17 +45,29 @@ def register_screen_tools(registry) -> None:
         _pyautogui().click(x=xi, y=yi, button=button)
         return f"Clicked {button} at ({xi}, {yi}). Use /look to verify the result."
 
-    def screen_type(text: str) -> str:
+    def screen_type(text: str, paste: bool = False) -> str:
         if not text:
             return "ERROR: empty text"
         if not registry.confirm(
-            f"Type {len(text)} characters into the currently focused window?"
+            f"Type {len(text)} characters into the currently focused window"
+            + (" via clipboard paste?" if paste else "?")
         ):
             return "BLOCKED: the user declined typing."
-        _pyautogui().typewrite(text, interval=0.01)  # ASCII only
+        automation = _pyautogui()
+        if paste:
+            # clipboard route: handles Unicode (pyperclip ships with pyautogui)
+            try:
+                import pyperclip
+
+                pyperclip.copy(text)
+                automation.hotkey("ctrl", "v")
+                return f"Pasted {len(text)} characters via clipboard."
+            except Exception as exc:
+                return f"ERROR: clipboard paste failed: {exc}"
+        automation.typewrite(text, interval=0.01)  # ASCII only
         return (
             f"Typed {len(text)} characters. Note: typing is ASCII-only; "
-            "non-ASCII text needs the clipboard."
+            "pass paste=true for non-ASCII text."
         )
 
     def screen_press(key: str) -> str:
@@ -96,11 +108,15 @@ def register_screen_tools(registry) -> None:
     )
     registry.register(
         "screen_type",
-        "Type text into the currently focused window (ASCII only). Requires "
-        "user confirmation.",
+        "Type text into the currently focused window. ASCII via keystrokes; "
+        "set paste=true for non-ASCII text (clipboard route). Requires user "
+        "confirmation.",
         {
             "type": "object",
-            "properties": {"text": {"type": "string"}},
+            "properties": {
+                "text": {"type": "string"},
+                "paste": {"type": "boolean", "description": "Use the clipboard (Unicode-safe)."},
+            },
             "required": ["text"],
         },
         screen_type,
