@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>UMBRA — the shadow that works for you</title>
+<style>
+  :root { --bg:#050A12; --cyan:#66F0FF; --amber:#FFB454; --dim:#7FA8B8; --panel:#0E2233; }
+  * { box-sizing: border-box; margin: 0; }
+  body { background:var(--bg); color:var(--cyan); font-family:Consolas,'Segoe UI',monospace; }
+  .scanlines { position:fixed; inset:0; pointer-events:none; opacity:.06;
+    background:repeating-linear-gradient(0deg, transparent 0 2px, #66F0FF 2px 3px); }
+  header { padding:60px 20px 30px; text-align:center; }
+  h1 { font-size:clamp(40px,8vw,72px); letter-spacing:12px; font-weight:200; }
+  .tag { color:var(--dim); letter-spacing:4px; font-size:14px; margin-top:10px; }
+  .cta { display:inline-block; margin:26px 10px 0; padding:14px 34px; border:1px solid var(--cyan);
+         color:var(--cyan); text-decoration:none; letter-spacing:3px; border-radius:4px; }
+  .cta.pro { border-color:var(--amber); color:var(--amber); }
+  .cta:hover { background:rgba(102,240,255,0.08); }
+  section { max-width:900px; margin:0 auto; padding:40px 20px; }
+  h2 { letter-spacing:5px; font-weight:200; color:var(--dim); font-size:16px; margin-bottom:24px; }
+  table { width:100%; border-collapse:collapse; }
+  td, th { border:1px solid #123246; padding:12px 16px; text-align:left; font-size:14px; }
+  th { color:var(--dim); font-weight:400; letter-spacing:2px; }
+  .yes { color:var(--cyan); } .no { color:#3a4a56; }
+  .pro { color:var(--amber); }
+  .grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(240px,1fr)); gap:16px; }
+  .card { border:1px solid #123246; background:var(--panel); padding:20px; }
+  .card b { color:var(--amber); display:block; margin-bottom:8px; letter-spacing:2px; }
+  .card p { color:var(--dim); font-size:13px; line-height:1.6; }
+  footer { text-align:center; color:#3a4a56; font-size:12px; padding:40px 20px; letter-spacing:2px; }
+  a { color:var(--cyan); }
+</style>
+</head>
+<body>
+<div class="scanlines"></div>
+<header>
+  <h1>U M B R A</h1>
+  <div class="tag">THE SHADOW THAT WORKS FOR YOU</div>
+  <a class="cta" href="#download">DOWNLOAD LITE — FREE</a>
+  <a class="cta pro" href="#pro">GET PRO</a>
+</header>
+
+<section>
+  <h2>WHAT IT IS</h2>
+  <p style="color:var(--dim); line-height:1.8;">
+    A local-first AI assistant for your PC and your phone. It hears you, sees your
+    screen, remembers what you tell it, anticipates — and speaks. Your keys, your
+    data, your machine: nothing you don't send to your own AI provider ever leaves
+    your device. Every powerful action passes a human confirmation gate. The shadow
+    works; you stay in control.
+  </p>
+</section>
+
+<section>
+  <h2>THE BODIES</h2>
+  <div class="grid">
+    <div class="card"><b>DESKTOP</b><p>The full agent: 19 tools — programs, files, apps, web search, system vitals, clipboard, memory — with live-streamed replies and a confirmation gate on every dangerous action.</p></div>
+    <div class="card"><b>PHONE HUD</b><p>An Android home-screen replacement: pulsing AI core, app ring, hold-to-talk — and a native link to command your desktop's full agent from anywhere on your network.</p></div>
+    <div class="card"><b>AVATAR</b><p>A web face with lip-synced speech. Bring your own VRM model for a full 3D presence.</p></div>
+    <div class="card"><b>PORTAL</b><p>A WebXR room for headsets: JARVIS panels floating in your space, a kanban wall on your wall, your models on a desk.</p></div>
+    <div class="card"><b>SENTINEL</b><p>Reminders and a spoken morning briefing — health screening, kanban digest, memory recap. Needs no API key.</p></div>
+    <div class="card"><b>WATCHTOWER</b><p>Ambient rules: CPU thresholds, folder activity, health shifts — noticed and announced on their own.</p></div>
+  </div>
+</section>
+
+<section>
+  <h2>LITE / PRO</h2>
+  <table>
+    <tr><th></th><th>LITE — free</th><th class="pro">PRO — license</th></tr>
+    <tr><td>Chat, voice, memory</td><td class="yes">✓</td><td class="pro">✓</td></tr>
+    <tr><td>Health Oracle (HR/HRV screening)</td><td class="yes">✓</td><td class="pro">✓</td></tr>
+    <tr><td>Reminders + morning briefing</td><td class="yes">✓</td><td class="pro">✓</td></tr>
+    <tr><td>Screenshots (/look)</td><td class="yes">✓</td><td class="pro">✓</td></tr>
+    <tr><td>Live screen sharing</td><td class="no">—</td><td class="pro">✓</td></tr>
+    <tr><td>Bridge — full agent over your LAN</td><td class="no">—</td><td class="pro">✓</td></tr>
+    <tr><td>Portal — WebXR room</td><td class="no">—</td><td class="pro">✓</td></tr>
+    <tr><td>Screen control</td><td class="no">—</td><td class="pro">✓</td></tr>
+    <tr><td>Watchtower — ambient rules</td><td class="no">—</td><td class="pro">✓</td></tr>
+  </table>
+</section>
+
+<section id="download">
+  <h2>DOWNLOAD LITE</h2>
+  <p style="color:var(--dim); line-height:1.8;">
+    Windows: standalone UMBRA.exe — no Python required.<br>
+    Android: UMBRA launcher APK — sideload and set as home.<br>
+    Source: clone the repository and <code>pip install .</code><br><br>
+    Requires your own AI provider API key (Z.AI GLM, OpenAI, Gemini, Ollama, or any
+    OpenAI-compatible endpoint). Your key stays on your machine.
+  </p>
+  <a class="cta" href="https://github.com/UmberAeternum/JARVIS/releases">RELEASES</a>
+  <a class="cta" href="https://github.com/UmberAeternum/jarvis-launcher/releases">LAUNCHER APK</a>
+</section>
+
+<section id="pro">
+  <h2>GET PRO</h2>
+  <p style="color:var(--dim); line-height:1.8;">
+    Purchase a PRO license from the publisher, then activate:
+  </p>
+  <div class="card" style="margin-top:12px;"><b>jarvis license activate UMBRA-xxxx.yyyy</b>
+  <p>Keys are Ed25519-signed, verified offline, and locked to you. No subscription, no phone-home.</p></div>
+  <p style="color:var(--dim); margin-top:16px;">Contact: the publisher's sales channel.</p>
+</section>
+
+<footer>
+  UMBRA — local-first. Health features are informational heuristics, not medical advice.<br>
+  © 2026 UMBRA publisher. All rights reserved.
+</footer>
+</body>
+</html>
