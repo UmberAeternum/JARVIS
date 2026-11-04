@@ -25,7 +25,7 @@ import re
 import time
 from datetime import datetime, timezone
 
-from . import config
+from . import config, health, watchtower
 
 KIND_DAILY = "daily"
 KIND_ONCE = "once"
@@ -249,6 +249,9 @@ def run_sentinel(console, interval_s: int = 20, briefing_time: str = "08:00") ->
 
     reminders = load_reminders()
     fired_on: dict[object, str] = {}
+    watch_last_fired: dict[object, float] = {}
+    watch_last_band: dict[str, str | None] = {"band": None}
+    folder_snaps: dict[str, tuple[int, float]] = {}
     tts = None
     try:
         import pyttsx3
@@ -268,10 +271,13 @@ def run_sentinel(console, interval_s: int = 20, briefing_time: str = "08:00") ->
 
     from rich.panel import Panel
 
+    from . import watchtower
+
     console.print(
         Panel(
             f"Sentinel online - checking every {interval_s}s. "
-            f"Reminders loaded: {len(reminders)}. Briefing at {briefing_value}. "
+            f"Reminders loaded: {len(reminders)}. Watch rules loaded: "
+            f"{len(watchtower.load_rules())}. Briefing at {briefing_value}. "
             "Ctrl+C to stand down.",
             title="THE SENTINEL",
             border_style="cyan",
@@ -294,6 +300,42 @@ def run_sentinel(console, interval_s: int = 20, briefing_time: str = "08:00") ->
             ):
                 fired_on["briefing"] = now.strftime("%Y-%m-%d")
                 announce(compose_briefing())
+
+            # Mark XI - the Watchtower: ambient rules, evaluated each cycle
+            for rule in [r for r in watchtower.load_rules() if r.get("kind") == "vitals"]:
+                if not watchtower.cooldown_passed(rule, watch_last_fired, time.time()):
+                    continue
+                finding = watchtower.evaluate_vitals(rule, watchtower.read_vitals())
+                if finding:
+                    watch_last_fired[rule["id"]] = time.time()
+                    announce(finding)
+
+            for rule in [r for r in watchtower.load_rules() if r.get("kind") == "folder"]:
+                path = str(rule.get("path", ""))
+                current = watchtower.folder_snapshot(path)
+                if current is None:
+                    continue
+                previous = folder_snaps.get(path)
+                folder_snaps[path] = current
+                if previous is None or previous == current:
+                    continue
+                if watchtower.cooldown_passed(rule, watch_last_fired, time.time()):
+                    watch_last_fired[rule["id"]] = time.time()
+                    announce(watchtower.describe_folder_change(path, previous, current))
+
+            for rule in [r for r in watchtower.load_rules() if r.get("kind") == "health"]:
+                report = health.risk_assessment()
+                first = report.splitlines()[0] if report else ""
+                band = next(
+                    (b for b in ("HIGH", "ELEVATED", "WATCH", "BASELINE") if b in first),
+                    None,
+                )
+                finding = watchtower.evaluate_health(rule, watch_last_band.get("band"), band)
+                watch_last_band["band"] = band
+                if finding:
+                    if watchtower.cooldown_passed(rule, watch_last_fired, time.time()):
+                        watch_last_fired[rule["id"]] = time.time()
+                        announce(finding)
             time.sleep(interval_s)
     except KeyboardInterrupt:
         console.print("[dim]Sentinel standing down, Sir.[/]")

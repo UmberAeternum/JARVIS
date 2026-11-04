@@ -41,6 +41,13 @@ TOOL_CONTRACT = """\
   merely acknowledging. daily for wall-clock times ("07:30"), one-shot for
   date-times.
 
+[WATCHTOWER]
+- watch tools (watch_set, watch_list, watch_remove) exist: ambient rules the
+  Sentinel evaluates every cycle - vitals thresholds (cpu/ram/disk_used/
+  battery), folder activity, and health band shifts.
+- When the user says "tell me if..." or "watch ...", set a watch rule instead
+  of merely acknowledging.
+
 [HEALTH SIGNALS]
 - health tools (health_log, health_import, health_check, health_trend) read
   the user's locally stored HR/HRV samples.

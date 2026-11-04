@@ -102,12 +102,12 @@ class FakeBrain:
 
 
 def version_string() -> None:
-    expect(__version__ == "2.1.0", __version__)
+    expect(__version__ == "2.2.0", __version__)
 
 
 def registry_built() -> None:
     reg = default_registry(confirm=lambda d: False)
-    expect(len(reg.schemas) == 19, f"expected 19 tools, got {len(reg.schemas)}")
+    expect(len(reg.schemas) == 22, f"expected 22 tools, got {len(reg.schemas)}")
 
 
 def allow_shell_false_drops_shell() -> None:
@@ -641,6 +641,67 @@ def bridge_confirm_and_events(tmp: Path) -> None:
     expect(not thread.is_alive(), "server thread should stop")
 
 
+def watchtower_rules_and_evaluators(tmp: Path) -> None:
+    from jarvis import watchtower
+
+    original = config.config_dir
+    config.config_dir = lambda: tmp / "cfgwatch"
+    try:
+        # rule store round-trip
+        saved = watchtower.add_rule({"kind": "vitals", "signal": "cpu", "op": ">",
+                                     "value": 90, "cooldown_min": 5})
+        expect(saved["id"] == 1, "first rule id")
+        watchtower.add_rule({"kind": "folder", "path": "C:/temp", "cooldown_min": 5})
+        expect(len(watchtower.load_rules()) == 2, "two rules stored")
+        expect(watchtower.remove_rule(1), "remove should succeed")
+
+        # vitals evaluator: trigger and no-trigger
+        triggered = watchtower.evaluate_vitals(
+            {"op": ">", "value": 90, "signal": "cpu"}, {"cpu": 95.0}
+        )
+        expect(triggered is not None and "cpu" in triggered, f"vitals trigger: {triggered}")
+        quiet = watchtower.evaluate_vitals(
+            {"op": ">", "value": 90, "signal": "cpu"}, {"cpu": 40.0}
+        )
+        expect(quiet is None, "below threshold must stay quiet")
+
+        # folder change detection
+        target = tmp / "watched"
+        target.mkdir(parents=True, exist_ok=True)
+        first = watchtower.folder_snapshot(str(target))
+        expect(first is not None, "snapshot of empty dir")
+        (target / "new.txt").write_text("data", encoding="utf-8")
+        second = watchtower.folder_snapshot(str(target))
+        expect(second != first, "snapshot must change when a file lands")
+        message = watchtower.describe_folder_change(str(target), first, second)
+        expect("Activity" in message, message)
+
+        # health band shift
+        finding = watchtower.evaluate_health({}, "BASELINE", "ELEVATED")
+        expect(finding is not None and "ELEVATED" in finding, finding)
+        expect(watchtower.evaluate_health({}, "ELEVATED", "ELEVATED") is None,
+               "same band must not re-fire")
+
+        # cooldown gate
+        expect(watchtower.cooldown_passed({"id": 9, "cooldown_min": 30}, {}, 1000.0),
+               "first fire always passes")
+        expect(not watchtower.cooldown_passed({"id": 9, "cooldown_min": 30}, {9: 1000.0},
+                                              1000.0 + 60),
+               "cooldown must block inside the window")
+
+        # tools dispatch
+        reg = default_registry(confirm=lambda d: False)
+        out = reg.dispatch("watch_set", json.dumps({"kind": "vitals", "signal": "ram",
+                                                    "op": "<", "value": 10}))
+        expect(out.startswith("Watch rule #"), out)
+        out = reg.dispatch("watch_list", "{}")
+        expect("vitals" in out, out)
+        out = reg.dispatch("watch_remove", json.dumps({"rule_id": 1}))
+        expect(out.startswith("BLOCKED"), f"expected BLOCKED, got: {out}")
+    finally:
+        config.config_dir = original
+
+
 def system_prompt_content() -> None:
     from jarvis import system_prompt
 
@@ -649,6 +710,7 @@ def system_prompt_content() -> None:
     expect("PERSISTENT MEMORY" in text, "memory contract missing")
     expect("HEALTH SIGNALS" in text, "health guidance missing")
     expect("SENTINEL" in text, "sentinel guidance missing")
+    expect("WATCHTOWER" in text, "watchtower guidance missing")
 
 
 def denylist_flags() -> None:
@@ -1067,7 +1129,7 @@ def agent_trim_keeps_pairs() -> None:
 
 def main() -> int:
     check("version string", version_string)
-    check("registry builds with 16 tools", registry_built)
+    check("registry builds with 22 tools", registry_built)
     check("allow_shell=False drops run_command", allow_shell_false_drops_shell)
     check("screen control is opt-in", screen_control_opt_in)
     check("denylist flags", denylist_flags)
@@ -1101,6 +1163,7 @@ def main() -> int:
         check("health tools dispatch", lambda: health_tools_dispatch(tmp_path))
         check("sentinel store + tools", lambda: sentinel_store_and_tools(tmp_path))
         check("sentinel briefing composer", lambda: sentinel_briefing_composer(tmp_path))
+        check("watchtower rules + evaluators", lambda: watchtower_rules_and_evaluators(tmp_path))
         check("avatar server round-trip", lambda: avatar_server_roundtrip(tmp_path))
         check("portal server round-trip", lambda: portal_server_roundtrip(tmp_path))
         check("bridge confirm + events", lambda: bridge_confirm_and_events(tmp_path))

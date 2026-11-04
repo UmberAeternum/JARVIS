@@ -271,6 +271,7 @@ def default_registry(
     allow_memory: bool = True,
     allow_health: bool = True,
     allow_sentinel: bool = True,
+    allow_watchtower: bool = True,
     allow_screen_control: bool = False,
 ) -> ToolRegistry:
     """Build the registry with every tool registered.
@@ -379,6 +380,10 @@ def default_registry(
         from .sentinel import register_sentinel_tools
 
         register_sentinel_tools(reg)
+    if allow_watchtower:
+        from .watchtower import register_watchtower_tools
+
+        register_watchtower_tools(reg)
     if allow_screen_control:
         from .screen_tools import register_screen_tools
 

@@ -32,6 +32,7 @@ Works with a **cloud brain** (Z.AI GLM, OpenAI, Google Gemini, or any OpenAI-com
 | **Portal (Mark VII)** | `jarvis portal` — a WebXR room for headsets and phones: JARVIS chat panel floating in your space, a kanban wall you cycle by pinch/trigger, your GLB models on a desk |
 | **Sentinel (Mark VIII)** | Reminders and a spoken morning briefing (health + kanban + memory) from a standalone local daemon — it initiates, needs no key, announces only |
 | **Bridge (Mark IX)** | `jarvis serve` — the **full agent over your LAN**: command the desktop from your phone, tool log streaming live, confirmations delivered as APPROVE/DENY buttons — and the [launcher](https://github.com/UmberAeternum/jarvis-launcher) connects to it natively (DESK ⌁) |
+| **Watchtower (Mark XI)** | Ambient rules the Sentinel evaluates every cycle: vitals thresholds (CPU/RAM/disk/battery), folder activity, health band shifts — announced aloud with cooldowns |
 
 ## Install
 
@@ -254,7 +255,9 @@ src/jarvis/
 - [x] Portal: WebXR room for headsets (chat panel, kanban wall, desk models)
 - [x] Sentinel: reminders, morning briefing, proactive layer
 - [x] Bridge: the full agent over the LAN with remote confirmations
-- [ ] Multi-monitor vision, clipboard paste for non-ASCII typing, wake-word tuning UI
+- [x] Watchtower: ambient rules (vitals thresholds, folder activity, health shifts)
+- [x] Multi-monitor `/look N`, non-ASCII clipboard typing
+- [ ] Wake-word tuning UI, streaming vision frames
 
 ## License
 

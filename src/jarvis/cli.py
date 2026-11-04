@@ -236,10 +236,18 @@ def _chat_loop(
             if not ok:
                 console.print(f"[yellow]{reason}[/]")
                 continue
-            question = user_text[5:].strip() or "Describe what is on my screen, concisely."
+            remainder = user_text[5:].strip()
+            monitor = cfg.vision.monitor
+            # optional monitor prefix: "/look 2 what's on the second screen"
+            if remainder[:2].isdigit() or (remainder[:1].isdigit()):
+                parts = remainder.split(" ", 1)
+                if parts[0].isdigit() and len(parts) > 1 and parts[0] != "0":
+                    monitor = int(parts[0]) - 1
+                    remainder = parts[1]
+            question = remainder or "Describe what is on my screen, concisely."
             try:
                 image = vision.capture(
-                    monitor=cfg.vision.monitor, max_width=cfg.vision.max_width
+                    monitor=monitor, max_width=cfg.vision.max_width
                 )
             except Exception as exc:
                 console.print(f"[red]{exc}[/]")
