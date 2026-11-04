@@ -1,0 +1,18 @@
+jarvis: the Mission Control (local web dashboard)
+
+A single-page mission control served on 127.0.0.1 only - every subsystem
+visual and clickable instead of CLI-only. Tabs: Chat (with past sessions),
+the Oracle (health screening), the second brain (memory), the kanban board,
+watchtower rules, and settings (brain + PRO license activation).
+
+- dashboard.py: local-only HTTP server (port auto-picked from 8773+),
+  DashboardState with brain chain + bounded history, JSON API endpoints.
+  Lazily imports subsystem modules; settings save preserves a blank key
+  field and rebuilds the brain chain; kanban cycling reuses portal.cycle_task.
+- dashboard_page.py: single-file HUD client, no external assets.
+- cli: jarvis dashboard (LITE - no network exposure, no tool execution).
+- Tests: page markers + full server round-trip (page, state, chat,
+  memory save/list/forget, kanban add/cycle, watch add/remove, settings
+  key preservation, license refusal, 404). Removed a duplicated check
+  registration.
+- Version 3.2.0.

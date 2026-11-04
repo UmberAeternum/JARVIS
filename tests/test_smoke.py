@@ -12,6 +12,7 @@ import json
 import os
 import sys
 import tempfile
+import threading
 import time
 import types
 from pathlib import Path
@@ -104,7 +105,7 @@ class FakeBrain:
 
 
 def version_string() -> None:
-    expect(__version__ == "3.1.0", __version__)
+    expect(__version__ == "3.2.0", __version__)
 
 
 def registry_built() -> None:
@@ -1295,6 +1296,141 @@ def agent_trim_keeps_pairs() -> None:
     expect(len(trimmed) <= HISTORY_LIMIT + 1, "trim exceeded the limit")
 
 
+def dashboard_page_markers() -> None:
+    from jarvis.dashboard_page import PAGE
+
+    expect("UMBRA" in PAGE, "product name missing from page")
+    for marker in ("/api/chat", "/api/memory", "/api/health", "/api/kanban",
+                   "/api/watch", "/api/settings", "/api/license/activate"):
+        expect(marker in PAGE, f"page missing endpoint hook: {marker}")
+    expect("<script>" in PAGE and "</script>" in PAGE, "page JS block missing")
+
+
+def dashboard_server_roundtrip(tmp: Path) -> None:
+    import http.client
+
+    from jarvis import dashboard as dash
+
+    original = config.config_dir
+    config.config_dir = lambda: tmp / "cfgdash"
+    try:
+        cfg = config.Config(brains=config.BrainsConfig(
+            primary=config.BrainConfig(type="cloud", provider="zai",
+                                       base_url="https://x/v1", model="m",
+                                       api_key=FAKE_KEY)))
+        # skip the real brain build - the chain is replaced with a fake
+        state = dash.DashboardState.__new__(dash.DashboardState)
+        state.cfg = cfg
+        state.history = [{"role": "system", "content": "s"}]
+        state.lock = threading.Lock()
+        state.chain = types.SimpleNamespace(
+            create_chat=lambda **kw: FakeResp(FakeMsg("at your service, Sir")))
+        server, port, thread = dash.start_server(state, preferred_port=0)
+        conn = http.client.HTTPConnection("127.0.0.1", port, timeout=10)
+        try:
+            expect(port > 0, "ephemeral port must be reported")
+            conn.request("GET", "/")
+            resp = conn.getresponse()
+            body = resp.read().decode("utf-8")
+            expect(resp.status == 200, "dashboard page status")
+            expect("UMBRA" in body and "/api/chat" in body, "dashboard page content")
+
+            conn.request("GET", "/api/state")
+            resp = conn.getresponse()
+            st = json.loads(resp.read().decode("utf-8"))
+            expect(resp.status == 200 and st["tier"] in ("lite", "pro"), "state endpoint")
+
+            conn.request("POST", "/api/chat", body=json.dumps({"text": "status"}),
+                         headers={"Content-Type": "application/json"})
+            resp = conn.getresponse()
+            reply = json.loads(resp.read().decode("utf-8"))
+            expect(reply["reply"] == "at your service, Sir", f"chat reply: {reply}")
+
+            conn.request("POST", "/api/memory/save",
+                         body=json.dumps({"note": "the vault code is 4471"}),
+                         headers={"Content-Type": "application/json"})
+            resp = conn.getresponse()
+            saved = json.loads(resp.read().decode("utf-8"))
+            expect(saved["status"] == "saved", "memory save")
+            conn.request("GET", "/api/memory")
+            resp = conn.getresponse()
+            notes = json.loads(resp.read().decode("utf-8"))["memories"]
+            expect(any("4471" in n["content"] for n in notes), "memory list")
+            conn.request("POST", "/api/memory/forget",
+                         body=json.dumps({"id": notes[0]["id"]}),
+                         headers={"Content-Type": "application/json"})
+            resp = conn.getresponse()
+            resp.read()
+            expect(resp.status == 200, "memory forget")
+
+            conn.request("POST", "/api/kanban",
+                         body=json.dumps({"action": "add", "text": "polish the armor"}),
+                         headers={"Content-Type": "application/json"})
+            resp = conn.getresponse()
+            board = json.loads(resp.read().decode("utf-8"))
+            expect(any(t["text"] == "polish the armor" for t in board["tasks"]),
+                   "kanban add")
+            tid = next(t["id"] for t in board["tasks"] if t["text"] == "polish the armor")
+            conn.request("POST", "/api/kanban",
+                         body=json.dumps({"action": "cycle", "id": tid}),
+                         headers={"Content-Type": "application/json"})
+            resp = conn.getresponse()
+            board2 = json.loads(resp.read().decode("utf-8"))
+            expect(next(t["column"] for t in board2["tasks"] if t["id"] == tid)
+                   == "doing", "kanban cycle")
+
+            conn.request("POST", "/api/watch",
+                         body=json.dumps({"action": "add", "rule": {"kind": "health"}}),
+                         headers={"Content-Type": "application/json"})
+            resp = conn.getresponse()
+            wr = json.loads(resp.read().decode("utf-8"))
+            expect(wr["status"] == "saved", "watch add")
+            conn.request("GET", "/api/watch")
+            resp = conn.getresponse()
+            rules = json.loads(resp.read().decode("utf-8"))["rules"]
+            expect(len(rules) == 1, "watch list")
+            conn.request("POST", "/api/watch",
+                         body=json.dumps({"action": "remove", "id": rules[0]["id"]}),
+                         headers={"Content-Type": "application/json"})
+            resp = conn.getresponse()
+            resp.read()
+            expect(resp.status == 200, "watch remove")
+
+            # blank key field must preserve the stored key
+            conn.request("POST", "/api/settings",
+                         body=json.dumps({"provider": "custom", "baseUrl": "https://x/v1",
+                                          "model": "m2", "apiKey": ""}),
+                         headers={"Content-Type": "application/json"})
+            resp = conn.getresponse()
+            resp.read()
+            expect(resp.status == 200, "settings save")
+            reloaded = config.Config.load()
+            expect(reloaded is not None and reloaded.brains.primary.model == "m2",
+                   "settings model not saved")
+            expect(reloaded.brains.primary.api_key == FAKE_KEY,
+                   "blank key field must keep the stored key")
+
+            conn.request("POST", "/api/license/activate",
+                         body=json.dumps({"key": "UMBRA-bogus.sig"}),
+                         headers={"Content-Type": "application/json"})
+            resp = conn.getresponse()
+            lic = json.loads(resp.read().decode("utf-8"))
+            expect(resp.status == 400 and lic["ok"] is False, "bad license must be refused")
+
+            conn.request("GET", "/api/nope")
+            resp = conn.getresponse()
+            expect(resp.status == 404, "unknown endpoint")
+            resp.read()
+        finally:
+            conn.close()
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=5)
+        expect(not thread.is_alive(), "dashboard thread should stop")
+    finally:
+        config.config_dir = original
+
+
 def main() -> int:
     check("version string", version_string)
     check("registry builds with 22 tools", registry_built)
@@ -1339,7 +1475,7 @@ def main() -> int:
         check("avatar server round-trip", lambda: avatar_server_roundtrip(tmp_path))
         check("portal server round-trip", lambda: portal_server_roundtrip(tmp_path))
         check("bridge confirm + events", lambda: bridge_confirm_and_events(tmp_path))
-        check("bridge confirm + events", lambda: bridge_confirm_and_events(tmp_path))
+        check("dashboard server round-trip", lambda: dashboard_server_roundtrip(tmp_path))
 
     check("BrainChain failover", chain_failover)
     check("BrainChain non-transient raises", chain_non_transient_raises)
@@ -1354,6 +1490,7 @@ def main() -> int:
     check("agent streams replies", agent_streams_replies)
     check("wake word matcher", wake_word_matcher)
     check("sentinel time parsing + due logic", sentinel_parse_and_due)
+    check("dashboard page markers", dashboard_page_markers)
 
     failed = [r for r in results if not r[0]]
     for ok, name, detail in results:

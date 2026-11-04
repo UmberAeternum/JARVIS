@@ -462,6 +462,7 @@ def main(argv: list[str] | None = None) -> int:
             "  face        the Avatar: local web face + chat (Mark VI)\n"
             "  portal      the Portal: WebXR room for headsets (Mark VII)\n"
             "  serve       the Bridge: full agent over the LAN (Mark IX)\n"
+            "  dashboard   the Mission Control: local web dashboard\n"
             "  license     activate <key> | status - PRO licensing"
         )
         return 0
@@ -528,6 +529,17 @@ def main(argv: list[str] | None = None) -> int:
             )
             return 1
         return run_bridge(console)
+    if argv and argv[0] == "dashboard":
+        from .dashboard import run_dashboard
+
+        if config.Config.load() is None:
+            console.print(
+                "[yellow]No brain configured yet.[/] Run [bold]python -m jarvis[/] "
+                "once and complete the wizard - the dashboard manages that brain."
+            )
+            return 1
+        # LITE feature: bound to 127.0.0.1 only, no tool execution, no network
+        return run_dashboard(console)
 
     dry_run = "--dry-run" in argv
     voice_requested = "--voice" in argv

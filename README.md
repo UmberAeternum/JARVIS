@@ -15,6 +15,7 @@ UMBRA works with a **cloud brain** (Z.AI GLM, OpenAI, Google Gemini, or any Open
 | Reminders + morning briefing | ✓ | ✓ |
 | `/look` screenshots | ✓ | ✓ |
 | Avatar (web face) | ✓ | ✓ |
+| Dashboard (local web mission control) | ✓ | ✓ |
 | `/live` screen sharing | — | ✓ |
 | **Bridge** — full agent over your LAN | — | ✓ |
 | **Portal** — WebXR room for headsets | — | ✓ |
@@ -54,6 +55,7 @@ Keys are Ed25519-signed by the publisher — they cannot be forged, and they nev
 | Desktop CLI (all tools, confirmations) | `umbra` / `jarvis` / `python -m jarvis` |
 | Phone HUD ([launcher repo](https://github.com/UmberAeternum/jarvis-launcher)) | APK from releases; DESK ⌁ connects to the Bridge |
 | Avatar (web face with lip sync) | `jarvis face` |
+| **Dashboard** (local web mission control: chat, Oracle, memory, kanban, watchtower, settings) | `jarvis dashboard` |
 | Portal (WebXR room for headsets) | `jarvis portal` |
 | Sentinel (proactive daemon) | `jarvis sentinel` |
 | The Oracle (health report) | `jarvis health` |
