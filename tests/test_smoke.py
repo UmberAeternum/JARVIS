@@ -8,6 +8,7 @@ guarded fetch, the shell=False runner, dry-run, file scoping, config v2
 
 from __future__ import annotations
 
+import gc
 import json
 import os
 import sys
@@ -2165,8 +2166,9 @@ def main() -> int:
     check("truncate_output", truncate_output)
     check("system prompt content", system_prompt_content)
 
-    with tempfile.TemporaryDirectory() as tmp:
-        tmp_path = Path(tmp)
+    tmp_obj = tempfile.TemporaryDirectory()
+    try:
+        tmp_path = Path(tmp_obj.name)
         check("file tools round-trip", lambda: file_tools_roundtrip(tmp_path))
         check("dry-run mode", lambda: dry_run_mode(tmp_path))
         check("read outside workspace warns", lambda: read_outside_workspace_warns(tmp_path))
@@ -2191,6 +2193,16 @@ def main() -> int:
         check("portal server round-trip", lambda: portal_server_roundtrip(tmp_path))
         check("bridge confirm + events", lambda: bridge_confirm_and_events(tmp_path))
         check("dashboard server round-trip", lambda: dashboard_server_roundtrip(tmp_path))
+    finally:
+        # On Windows, SQLite connections garbage-collected during context-manager
+        # teardown can hold the temp dir open (WinError 32). Collect, then retry.
+        gc.collect()
+        for _ in range(5):
+            try:
+                tmp_obj.cleanup()
+                break
+            except PermissionError:
+                time.sleep(0.3)
     check("settings apply + redaction", lambda: settings_apply_and_redact(tmp_path))
     check("setup --yes non-interactive paths", lambda: setup_noninteractive_paths(tmp_path))
     check("update manifest verification", update_manifest_verification)
