@@ -5,38 +5,171 @@ network). Tabbed interface: Chat, Health (the Oracle), Memory (the second
 brain), Kanban, Watch rules, and Settings — every subsystem visual and
 clickable instead of CLI-only.
 
-All module imports happen lazily inside handler methods (the established
+Mark XXI: the console tab runs the FULL agent — all tools, the same
+confirmation gate as the CLI, delivered in the browser as APPROVE/DENY
+buttons (the Mark IX bridge pattern, minus the network: no token, loopback
+only). Progress flows out as events (user/status/confirm_request/reply)
+that the page polls from /api/events. Every turn is logged to the local
+conversation store exactly like the CLI does.
+
+All subsystem imports happen lazily inside handler methods (the established
 pattern), so the module can be imported without triggering the full stack.
 """
 
 from __future__ import annotations
 
 import json
+import secrets
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
 
 from . import config
 from .dashboard_page import PAGE
 
 DEFAULT_PORT = 8773
 PORT_ATTEMPTS = 20
-
-SYSTEM_PROMPT = (
-    "You are UMBRA, the user's desktop assistant, shown in a web dashboard. "
-    "Address the user as Sir. Be brief, factual and helpful."
-)
+CONFIRM_TIMEOUT_S = 120
+MAX_EVENTS = 600
 
 
 class DashboardState:
-    """Holds the brain chain and config for the handler's use."""
+    """The full agent plus the event/confirmation plumbing for the local UI."""
 
     def __init__(self, cfg):
+        from . import licensing
+        from .tools import default_registry
+
         self.cfg = cfg
+        self.events: list[dict] = []
+        self.events_condition = threading.Condition()
+        self.pending: dict[str, dict] = {}
+        self.turn_lock = threading.Lock()
+        self.turn_running = False
+        self.session_id: int | None = None  # lazy: created on the first turn
+        self.confirm_timeout = CONFIRM_TIMEOUT_S
+        self.log_lock = threading.Lock()
+
+        self.registry = default_registry(
+            confirm=self.confirm,
+            workspace=Path.cwd(),
+            allow_screen_control=cfg.vision.screen_control and licensing.is_pro(),
+            allow_watchtower=licensing.is_pro(),
+        )
+        from .agent import Agent
         from .brain import make_brain_chain
 
-        self.chain = make_brain_chain(cfg)
-        self.history: list[dict] = [{"role": "system", "content": SYSTEM_PROMPT}]
-        self.lock = threading.Lock()
+        chain = make_brain_chain(cfg, on_status=self.push_status)
+        self.agent = Agent(
+            chain,
+            self.registry,
+            on_status=self.push_status,
+            max_tool_iterations=cfg.max_tool_iterations,
+            max_tokens_per_turn=cfg.max_tokens_per_turn,
+        )
+        self.push_event("status", {"text": "dashboard online"})
+
+    # ---------------------------------------------------------------- events
+
+    def push_event(self, event_type: str, fields: dict | None = None) -> int:
+        with self.events_condition:
+            event = {"id": len(self.events) + 1, "type": event_type, **(fields or {})}
+            self.events.append(event)
+            if len(self.events) > MAX_EVENTS:
+                del self.events[: len(self.events) - MAX_EVENTS]
+            self.events_condition.notify_all()
+            return event["id"]
+
+    def events_since(self, since: int) -> list[dict]:
+        with self.events_condition:
+            return [event for event in self.events if event["id"] > since]
+
+    def wait_for_events(self, since: int, timeout: float) -> list[dict]:
+        with self.events_condition:
+            if not any(event["id"] > since for event in self.events):
+                self.events_condition.wait(timeout=timeout)
+            return [event for event in self.events if event["id"] > since]
+
+    def push_status(self, status: str) -> None:
+        self.push_event("status", {"text": status})
+
+    # ------------------------------------------------------------------ gate
+
+    def confirm(self, description: str) -> bool:
+        """The registry's confirmation callback, bridged to the browser."""
+        confirm_id = "c" + secrets.token_hex(4)
+        approved_event = threading.Event()
+        with self.events_condition:
+            self.pending[confirm_id] = {
+                "description": description,
+                "result": None,
+                "event": approved_event,
+            }
+        self.push_event("confirm_request", {"confirm_id": confirm_id, "description": description})
+        approved = approved_event.wait(timeout=self.confirm_timeout)
+        if not approved:
+            self.push_event("status", {"text": "confirmation timed out - action denied"})
+            return False
+        with self.events_condition:
+            result = bool(self.pending[confirm_id]["result"])
+        self.push_event(
+            "status",
+            {"text": ("approved: " if result else "denied: ") + description},
+        )
+        return result
+
+    def answer(self, confirm_id: str, approved: bool) -> bool:
+        with self.events_condition:
+            pending = self.pending.get(confirm_id)
+            if pending is None or pending["result"] is not None:
+                return False
+            pending["result"] = approved
+            pending["event"].set()
+            return True
+
+    # ------------------------------------------------------------------ turns
+
+    def run_turn_async(self, text: str) -> dict:
+        if not self.turn_lock.acquire(blocking=False):
+            return {"error": "a turn is already running"}
+        self.turn_running = True
+        try:
+            self.push_event("user", {"text": text})
+
+            def worker() -> None:
+                reply = None
+                try:
+                    reply = self.agent.run_turn(text)
+                    self.push_event("reply", {"text": reply})
+                except Exception as exc:
+                    reply = f"ERROR: {type(exc).__name__}: {exc}"
+                    self.push_event("reply", {"text": reply})
+                finally:
+                    # the turn is over once the reply is out - the next turn
+                    # must not wait behind post-turn logging housekeeping
+                    self.turn_running = False
+                    self.turn_lock.release()
+                self._log_turn(text, reply)
+
+            threading.Thread(target=worker, daemon=True).start()
+            return {"started": True}
+        except Exception:
+            self.turn_running = False
+            self.turn_lock.release()
+            raise
+
+    def _log_turn(self, user_text: str, reply: str) -> None:
+        """Mark XV parity: dashboard turns land in the conversation store too."""
+        try:
+            from . import conversations
+
+            with self.log_lock:  # runs outside the turn lock - serialize it
+                if self.session_id is None:
+                    self.session_id = conversations.start_session("Dashboard session")
+                conversations.log_message(self.session_id, "user", user_text)
+                conversations.log_message(self.session_id, "assistant", reply)
+        except Exception:
+            pass  # logging must never break the conversation
 
 
 def make_handler(state: DashboardState) -> type:
@@ -55,11 +188,24 @@ def make_handler(state: DashboardState) -> type:
             self._send(code, json.dumps(data).encode("utf-8"), "application/json")
 
         def do_GET(self) -> None:  # noqa: N802 - stdlib naming
-            path = self.path.split("?")[0].rstrip("/") or "/"
+            path, _, query = self.path.partition("?")
+            path = path.rstrip("/") or "/"
             if path in ("/", "/index.html"):
-                from .dashboard_page import PAGE
-
                 self._send(200, PAGE.encode("utf-8"), "text/html; charset=utf-8")
+                return
+
+            if path == "/api/events":
+                since = 0
+                for pair in query.split("&"):
+                    if pair.startswith("since="):
+                        since = int(pair[6:] or 0)
+                events = state.wait_for_events(since, timeout=10.0)
+                last = events[-1]["id"] if events else since
+                self._json(200, {"events": events, "last": last})
+                return
+
+            if path == "/api/status":
+                self._json(200, {"turn_running": state.turn_running})
                 return
 
             if path == "/api/state":
@@ -137,18 +283,15 @@ def make_handler(state: DashboardState) -> type:
                 if not text:
                     self._json(400, {"error": "empty message"})
                     return
-                with state.lock:
-                    state.history.append({"role": "user", "content": text})
-                    try:
-                        response = state.chain.create_chat(messages=list(state.history))
-                        reply = (response.choices[0].message.content or "").strip()
-                    except Exception as exc:
-                        reply = f"ERROR: {type(exc).__name__}: {exc}"
-                    # keep the history consistent even when the turn fails
-                    state.history.append({"role": "assistant", "content": reply})
-                    if len(state.history) > 41:
-                        state.history = [state.history[0]] + state.history[-40:]
-                self._json(200, {"reply": reply})
+                result = state.run_turn_async(text)
+                self._json(200 if "started" in result else 409, result)
+                return
+
+            if path == "/api/confirm":
+                answered = state.answer(
+                    str(payload.get("confirm_id", "")), bool(payload.get("approved", False))
+                )
+                self._json(200 if answered else 404, {"answered": answered})
                 return
 
             if path == "/api/memory/save":
@@ -230,7 +373,7 @@ def make_handler(state: DashboardState) -> type:
                 cfg.save()
                 # the old chain still points at the previous brain - rebuild it
                 state.cfg = cfg
-                state.chain = make_brain_chain(cfg)
+                state.agent.chain = make_brain_chain(cfg)
                 self._json(200, {"status": "saved"})
                 return
 
@@ -295,7 +438,9 @@ def run_dashboard(console) -> int:  # pragma: no cover - interactive loop
     console.print(
         Panel(
             f"[bold cyan]{url}[/]\n\n"
-            "Bound to 127.0.0.1 only - never exposed to the network. Ctrl+C to stop.",
+            "The full agent - all tools - with confirmations as APPROVE/DENY\n"
+            "in the browser. Bound to 127.0.0.1 only, never the network.\n"
+            "Ctrl+C to stop.",
             title="UMBRA - the Dashboard",
             border_style="cyan",
         )

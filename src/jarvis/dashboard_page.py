@@ -93,6 +93,15 @@ PAGE = """<!doctype html>
   .toast.show { display: block; }
   .toast.bad { border-color: var(--bad); color: var(--bad); }
   .kicker { color: var(--dim); font-size: 11px; letter-spacing: 0.2em; margin: 10px 0 4px; }
+  .statusline { color: var(--dim); font-size: 11px; padding: 1px 4px; align-self: flex-start; }
+  .confirm {
+    align-self: stretch; border: 1px solid var(--amber); border-radius: 8px;
+    background: rgba(255, 179, 0, 0.07); padding: 10px 12px; margin: 4px 0;
+  }
+  .confirm .ctext { color: var(--amber); font-size: 13px; white-space: pre-wrap; word-break: break-word; }
+  .confirm .cbtns { display: flex; gap: 8px; margin-top: 8px; }
+  .confirm .yes { border-color: rgba(74, 222, 128, 0.6); color: var(--ok); }
+  .confirm .no { border-color: rgba(255, 107, 107, 0.6); color: var(--bad); }
 </style>
 </head>
 <body>
@@ -114,10 +123,11 @@ PAGE = """<!doctype html>
 <main>
   <section id="tab-chat" class="active">
     <div class="card">
-      <h3>CONSOLE</h3>
+      <h3>CONSOLE - FULL AGENT</h3>
+      <div class="muted" style="margin-bottom:8px">All tools live. Dangerous actions ask here, as APPROVE/DENY. Every turn is logged to your local conversation store.</div>
       <div id="chatlog"></div>
       <div class="row">
-        <input id="chatinput" placeholder="Speak, Sir... (Enter to send)" autocomplete="off">
+        <input id="chatinput" placeholder="Command the agent, Sir... (Enter to send)" autocomplete="off">
         <button class="act" onclick="sendChat()">SEND</button>
       </div>
     </div>
@@ -246,7 +256,7 @@ document.querySelectorAll("nav button").forEach(function (btn) {
   });
 });
 
-/* chat */
+/* chat - full agent with events + approvals (Mark XXI) */
 function addMsg(role, text) {
   var div = document.createElement("div");
   div.className = "msg " + (role === "user" ? "user" : text.indexOf("ERROR:") === 0 ? "bot err" : "bot");
@@ -254,15 +264,66 @@ function addMsg(role, text) {
   $("chatlog").appendChild(div);
   $("chatlog").scrollTop = $("chatlog").scrollHeight;
 }
+function addStatus(text) {
+  var div = document.createElement("div");
+  div.className = "statusline";
+  div.textContent = ">> " + text;
+  $("chatlog").appendChild(div);
+  $("chatlog").scrollTop = $("chatlog").scrollHeight;
+}
+function showConfirm(id, description) {
+  if (document.getElementById("confirm-" + id)) return;
+  var banner = document.createElement("div");
+  banner.className = "confirm";
+  banner.id = "confirm-" + id;
+  var label = document.createElement("div");
+  label.className = "ctext";
+  label.textContent = description;
+  var btns = document.createElement("div");
+  btns.className = "cbtns";
+  var yes = document.createElement("button");
+  yes.className = "act yes";
+  yes.textContent = "APPROVE";
+  yes.onclick = function () { answerConfirm(id, true); };
+  var no = document.createElement("button");
+  no.className = "act no";
+  no.textContent = "DENY";
+  no.onclick = function () { answerConfirm(id, false); };
+  btns.appendChild(yes);
+  btns.appendChild(no);
+  banner.appendChild(label);
+  banner.appendChild(btns);
+  $("chatlog").appendChild(banner);
+  $("chatlog").scrollTop = $("chatlog").scrollHeight;
+}
+function answerConfirm(id, approved) {
+  var banner = document.getElementById("confirm-" + id);
+  if (banner) banner.remove();
+  api("/api/confirm", { confirm_id: id, approved: approved });
+}
+function applyEvent(ev) {
+  if (ev.type === "user") addMsg("user", ev.text);
+  else if (ev.type === "reply") addMsg("bot", ev.text);
+  else if (ev.type === "status") addStatus(ev.text);
+  else if (ev.type === "confirm_request") showConfirm(ev.confirm_id, ev.description);
+}
+var lastEvent = 0;
+function pollEvents() {
+  api("/api/events?since=" + lastEvent).then(function (res) {
+    var events = res.data.events || [];
+    for (var i = 0; i < events.length; i++) applyEvent(events[i]);
+    if (events.length) lastEvent = events[events.length - 1].id;
+    setTimeout(pollEvents, 400);
+  }).catch(function () { setTimeout(pollEvents, 1500); });
+}
 function sendChat() {
   var input = $("chatinput");
   var text = input.value.trim();
   if (!text) return;
   input.value = "";
-  addMsg("user", text);
   api("/api/chat", { text: text }).then(function (res) {
-    addMsg("bot", res.data.reply || "ERROR: empty reply");
-  }).catch(function (e) { addMsg("bot", "ERROR: " + e); });
+    if (!res.ok) toast(res.data.error || "turn refused", true);
+  }).catch(function (e) { toast("ERROR: " + e, true); });
 }
 $("chatinput").addEventListener("keydown", function (e) { if (e.key === "Enter") sendChat(); });
 
@@ -412,9 +473,9 @@ function refreshState() {
 }
 
 /* boot */
-addMsg("bot", "UMBRA mission control online, Sir. Bound to this machine only.");
 refreshState();
 loadSessions();
+pollEvents();
 </script>
 </body>
 </html>

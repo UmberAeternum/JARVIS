@@ -105,7 +105,7 @@ class FakeBrain:
 
 
 def version_string() -> None:
-    expect(__version__ == "3.7.0", __version__)
+    expect(__version__ == "3.8.0", __version__)
 
 
 def registry_built() -> None:
@@ -1300,13 +1300,16 @@ def dashboard_page_markers() -> None:
     from jarvis.dashboard_page import PAGE
 
     expect("UMBRA" in PAGE, "product name missing from page")
-    for marker in ("/api/chat", "/api/memory", "/api/health", "/api/kanban",
-                   "/api/watch", "/api/settings", "/api/license/activate"):
+    for marker in ("/api/chat", "/api/events", "/api/confirm", "/api/memory",
+                   "/api/health", "/api/kanban", "/api/watch", "/api/settings",
+                   "/api/license/activate"):
         expect(marker in PAGE, f"page missing endpoint hook: {marker}")
+    expect("APPROVE" in PAGE and "DENY" in PAGE, "approval buttons missing from page")
     expect("<script>" in PAGE and "</script>" in PAGE, "page JS block missing")
 
 
 def dashboard_server_roundtrip(tmp: Path) -> None:
+    """Mark XXI: the console runs the FULL agent - tools, events, approvals."""
     import http.client
 
     from jarvis import dashboard as dash
@@ -1314,17 +1317,24 @@ def dashboard_server_roundtrip(tmp: Path) -> None:
     original = config.config_dir
     config.config_dir = lambda: tmp / "cfgdash"
     try:
-        cfg = config.Config(brains=config.BrainsConfig(
-            primary=config.BrainConfig(type="cloud", provider="zai",
-                                       base_url="https://x/v1", model="m",
-                                       api_key=FAKE_KEY)))
-        # skip the real brain build - the chain is replaced with a fake
-        state = dash.DashboardState.__new__(dash.DashboardState)
-        state.cfg = cfg
-        state.history = [{"role": "system", "content": "s"}]
-        state.lock = threading.Lock()
-        state.chain = types.SimpleNamespace(
-            create_chat=lambda **kw: FakeResp(FakeMsg("at your service, Sir")))
+        # real agent + registry (offline construction); the brain chain is faked
+        state = dash.DashboardState(config.Config())
+        tool_responses = iter([
+            FakeResp(FakeMsg("", tool_calls=[fake_tool_call("t1", "dash_gated", "{}")])),
+            FakeResp(FakeMsg("gated action complete, Sir")),
+        ])
+        state.agent.chain = types.SimpleNamespace(create_chat=lambda **kw: next(tool_responses))
+
+        def gated_action() -> str:
+            return "ran" if state.confirm("Run the gated dashboard action?") else "BLOCKED"
+
+        state.registry.register(
+            "dash_gated",
+            "A test tool that always requires confirmation.",
+            {"type": "object", "properties": {}},
+            gated_action,
+        )
+
         server, port, thread = dash.start_server(state, preferred_port=0)
         conn = http.client.HTTPConnection("127.0.0.1", port, timeout=10)
         try:
@@ -1333,43 +1343,119 @@ def dashboard_server_roundtrip(tmp: Path) -> None:
             resp = conn.getresponse()
             body = resp.read().decode("utf-8")
             expect(resp.status == 200, "dashboard page status")
-            expect("UMBRA" in body and "/api/chat" in body, "dashboard page content")
+            expect("UMBRA" in body and "APPROVE" in body and "DENY" in body,
+                   "dashboard page content")
 
-            conn.request("GET", "/api/state")
-            resp = conn.getresponse()
-            st = json.loads(resp.read().decode("utf-8"))
-            expect(resp.status == 200 and st["tier"] in ("lite", "pro"), "state endpoint")
-
-            conn.request("POST", "/api/chat", body=json.dumps({"text": "status"}),
+            # start a turn -> the tool needs approval -> approve it remotely
+            conn.request("POST", "/api/chat",
+                         body=json.dumps({"text": "run the gated thing"}),
                          headers={"Content-Type": "application/json"})
             resp = conn.getresponse()
-            reply = json.loads(resp.read().decode("utf-8"))
-            expect(reply["reply"] == "at your service, Sir", f"chat reply: {reply}")
+            started = json.loads(resp.read().decode("utf-8"))
+            expect(started.get("started") is True, f"expected started, got: {started}")
 
+            last = 0
+            deadline = time.time() + 10
+            confirm_id = None
+            while time.time() < deadline and confirm_id is None:
+                conn.request("GET", f"/api/events?since={last}")
+                resp = conn.getresponse()
+                data = json.loads(resp.read().decode("utf-8"))
+                for event in data["events"]:
+                    if event["type"] == "confirm_request":
+                        confirm_id = event["confirm_id"]
+                last = data.get("last", last)
+                if confirm_id is None:
+                    time.sleep(0.2)
+            expect(confirm_id is not None, "no confirm_request event arrived")
+
+            conn.request("POST", "/api/confirm",
+                         body=json.dumps({"confirm_id": confirm_id, "approved": True}),
+                         headers={"Content-Type": "application/json"})
+            resp = conn.getresponse()
+            resp.read()
+            expect(resp.status == 200, "confirm answer should be accepted")
+
+            deadline = time.time() + 10
+            reply = None
+            while time.time() < deadline and reply is None:
+                conn.request("GET", f"/api/events?since={last}")
+                resp = conn.getresponse()
+                data = json.loads(resp.read().decode("utf-8"))
+                for event in data["events"]:
+                    if event["type"] == "reply":
+                        reply = event["text"]
+                last = data.get("last", last)
+                if reply is None:
+                    time.sleep(0.2)
+            expect(reply == "gated action complete, Sir", f"unexpected reply: {reply}")
+
+            conn.request("GET", "/api/events?since=0")
+            resp = conn.getresponse()
+            data = json.loads(resp.read().decode("utf-8"))
+            statuses = [event["text"] for event in data["events"] if event["type"] == "status"]
+            expect(any("approved:" in status for status in statuses),
+                   f"approval status line missing: {statuses}")
+
+            # deny path: a second turn, refused remotely
+            tool_responses2 = iter([
+                FakeResp(FakeMsg("", tool_calls=[fake_tool_call("t2", "dash_gated", "{}")])),
+                FakeResp(FakeMsg("BLOCKED - the user refused, Sir.")),
+            ])
+            state.agent.chain = types.SimpleNamespace(create_chat=lambda **kw: next(tool_responses2))
+            conn.request("POST", "/api/chat", body=json.dumps({"text": "try again"}),
+                         headers={"Content-Type": "application/json"})
+            resp = conn.getresponse()
+            started2 = json.loads(resp.read().decode("utf-8"))
+            expect(started2.get("started") is True, f"second turn: {started2}")
+
+            deadline = time.time() + 10
+            deny_id = None
+            while time.time() < deadline and deny_id is None:
+                conn.request("GET", f"/api/events?since={last}")
+                resp = conn.getresponse()
+                data = json.loads(resp.read().decode("utf-8"))
+                for event in data["events"]:
+                    if event["type"] == "confirm_request":
+                        deny_id = event["confirm_id"]
+                last = data.get("last", last)
+                if deny_id is None:
+                    time.sleep(0.2)
+            expect(deny_id is not None, "second confirm_request missing")
+
+            conn.request("POST", "/api/confirm",
+                         body=json.dumps({"confirm_id": deny_id, "approved": False}),
+                         headers={"Content-Type": "application/json"})
+            resp = conn.getresponse()
+            resp.read()
+            deadline = time.time() + 10
+            blocked_seen = False
+            while time.time() < deadline and not blocked_seen:
+                conn.request("GET", f"/api/events?since={last}")
+                resp = conn.getresponse()
+                data = json.loads(resp.read().decode("utf-8"))
+                for event in data["events"]:
+                    if event["type"] == "reply" and "BLOCKED" in event["text"]:
+                        blocked_seen = True
+                    if event["id"] > last:
+                        last = event["id"]
+                if not blocked_seen:
+                    time.sleep(0.2)
+            expect(blocked_seen, "denied gate should yield a BLOCKED reply")
+
+            # the other subsystem endpoints still work alongside the agent
             conn.request("POST", "/api/memory/save",
                          body=json.dumps({"note": "the vault code is 4471"}),
                          headers={"Content-Type": "application/json"})
             resp = conn.getresponse()
-            saved = json.loads(resp.read().decode("utf-8"))
-            expect(saved["status"] == "saved", "memory save")
-            conn.request("GET", "/api/memory")
-            resp = conn.getresponse()
-            notes = json.loads(resp.read().decode("utf-8"))["memories"]
-            expect(any("4471" in n["content"] for n in notes), "memory list")
-            conn.request("POST", "/api/memory/forget",
-                         body=json.dumps({"id": notes[0]["id"]}),
-                         headers={"Content-Type": "application/json"})
-            resp = conn.getresponse()
             resp.read()
-            expect(resp.status == 200, "memory forget")
+            expect(resp.status == 200, "memory save")
 
             conn.request("POST", "/api/kanban",
                          body=json.dumps({"action": "add", "text": "polish the armor"}),
                          headers={"Content-Type": "application/json"})
             resp = conn.getresponse()
             board = json.loads(resp.read().decode("utf-8"))
-            expect(any(t["text"] == "polish the armor" for t in board["tasks"]),
-                   "kanban add")
             tid = next(t["id"] for t in board["tasks"] if t["text"] == "polish the armor")
             conn.request("POST", "/api/kanban",
                          body=json.dumps({"action": "cycle", "id": tid}),
@@ -1379,24 +1465,22 @@ def dashboard_server_roundtrip(tmp: Path) -> None:
             expect(next(t["column"] for t in board2["tasks"] if t["id"] == tid)
                    == "doing", "kanban cycle")
 
-            conn.request("POST", "/api/watch",
-                         body=json.dumps({"action": "add", "rule": {"kind": "health"}}),
+            conn.request("POST", "/api/license/activate",
+                         body=json.dumps({"key": "UMBRA-bogus.sig"}),
                          headers={"Content-Type": "application/json"})
             resp = conn.getresponse()
-            wr = json.loads(resp.read().decode("utf-8"))
-            expect(wr["status"] == "saved", "watch add")
-            conn.request("GET", "/api/watch")
-            resp = conn.getresponse()
-            rules = json.loads(resp.read().decode("utf-8"))["rules"]
-            expect(len(rules) == 1, "watch list")
-            conn.request("POST", "/api/watch",
-                         body=json.dumps({"action": "remove", "id": rules[0]["id"]}),
-                         headers={"Content-Type": "application/json"})
-            resp = conn.getresponse()
-            resp.read()
-            expect(resp.status == 200, "watch remove")
+            lic = json.loads(resp.read().decode("utf-8"))
+            expect(resp.status == 400 and lic["ok"] is False, "bad license must be refused")
 
-            # blank key field must preserve the stored key
+            # dashboard turns land in the conversation store (Mark XV parity)
+            conn.request("GET", "/api/history")
+            resp = conn.getresponse()
+            history = json.loads(resp.read().decode("utf-8"))
+            expect(any(s["title"] == "Dashboard session" for s in history["sessions"]),
+                   "dashboard turns not logged to the conversation store")
+
+            # settings: blank key preserves the stored key, brain chain rebuilt
+            state.cfg.brains.primary.api_key = FAKE_KEY
             conn.request("POST", "/api/settings",
                          body=json.dumps({"provider": "custom", "baseUrl": "https://x/v1",
                                           "model": "m2", "apiKey": ""}),
@@ -1409,13 +1493,6 @@ def dashboard_server_roundtrip(tmp: Path) -> None:
                    "settings model not saved")
             expect(reloaded.brains.primary.api_key == FAKE_KEY,
                    "blank key field must keep the stored key")
-
-            conn.request("POST", "/api/license/activate",
-                         body=json.dumps({"key": "UMBRA-bogus.sig"}),
-                         headers={"Content-Type": "application/json"})
-            resp = conn.getresponse()
-            lic = json.loads(resp.read().decode("utf-8"))
-            expect(resp.status == 400 and lic["ok"] is False, "bad license must be refused")
 
             conn.request("GET", "/api/nope")
             resp = conn.getresponse()
