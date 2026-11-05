@@ -1510,12 +1510,19 @@ def dashboard_server_roundtrip(tmp: Path) -> None:
             lic = json.loads(resp.read().decode("utf-8"))
             expect(resp.status == 400 and lic["ok"] is False, "bad license must be refused")
 
-            # dashboard turns land in the conversation store (Mark XV parity)
-            conn.request("GET", "/api/history")
-            resp = conn.getresponse()
-            history = json.loads(resp.read().decode("utf-8"))
-            expect(any(s["title"] == "Dashboard session" for s in history["sessions"]),
-                   "dashboard turns not logged to the conversation store")
+            # dashboard turns land in the conversation store (Mark XV parity).
+            # The worker logs the turn AFTER pushing the reply event, so poll
+            # for the session instead of asserting the instant the reply lands.
+            deadline = time.time() + 10
+            logged = False
+            while time.time() < deadline and not logged:
+                conn.request("GET", "/api/history")
+                resp = conn.getresponse()
+                history = json.loads(resp.read().decode("utf-8"))
+                logged = any(s["title"] == "Dashboard session" for s in history["sessions"])
+                if not logged:
+                    time.sleep(0.2)
+            expect(logged, "dashboard turns not logged to the conversation store")
 
             # settings: blank key preserves the stored key, brain chain rebuilt
             state.cfg.brains.primary.api_key = FAKE_KEY
