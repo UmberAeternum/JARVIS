@@ -1,6 +1,7 @@
 # UMBRA
 
 [![CI](https://github.com/UmberAeternum/JARVIS/actions/workflows/ci.yml/badge.svg)](https://github.com/UmberAeternum/JARVIS/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/UmberAeternum/JARVIS)](https://github.com/UmberAeternum/JARVIS/releases/latest)
 
 **The shadow that works for you.** A local-first AI assistant for your PC and your pocket — it hears you, sees your screen, remembers what you tell it, anticipates, and speaks. Built on a safety architecture where every powerful action passes a human confirmation gate.
 
@@ -24,7 +25,9 @@ UMBRA works with a **cloud brain** (Z.AI GLM, OpenAI, Google Gemini, or any Open
 
 ## Install (LITE — free)
 
-Requires Python 3.10+.
+**No Python?** Grab the standalone [UMBRA.exe from the latest release](https://github.com/UmberAeternum/JARVIS/releases/latest) — double-click and the setup wizard handles the rest. Verify the download with the attached `SHA256SUMS`.
+
+From source, requires Python 3.10+:
 
 ```bash
 git clone https://github.com/UmberAeternum/JARVIS.git
