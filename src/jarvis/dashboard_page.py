@@ -331,9 +331,20 @@ function loadSessions() {
   api("/api/history").then(function (res) {
     var rows = (res.data.sessions || []).map(function (s) {
       return '<div class="item"><span>#' + esc(s.id) + " " + esc(s.title || "(untitled)") +
-        '</span><span class="muted">' + esc(s.turns) + " turns - " + esc(String(s.started_at || "").slice(0, 16)) + "</span></div>";
+        '</span><span class="muted">' + esc(s.turns) + " turns - " + esc(String(s.started_at || "").slice(0, 16)) +
+        ' <button class="mini" onclick="resumeSession(' + esc(s.id) + ')">RESUME</button></span></div>';
     });
     $("sessions").innerHTML = rows.length ? rows.join("") : "No sessions yet.";
+  });
+}
+function resumeSession(id) {
+  api("/api/resume", { id: id }).then(function (res) {
+    if (res.ok) {
+      addStatus("resumed session #" + id + " - " + res.data.messages + " messages back in context, Sir");
+      toast("Session #" + id + " loaded into the console.");
+    } else {
+      toast(res.data.error || "resume failed", true);
+    }
   });
 }
 

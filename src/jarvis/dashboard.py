@@ -252,6 +252,17 @@ def make_handler(state: DashboardState) -> type:
                 self._json(200, {"sessions": list_sessions(20)})
                 return
 
+            if path == "/api/session":
+                # Mark XXII - the Record: read one session's messages
+                from .conversations import session_messages
+
+                sid = 0
+                for pair in query.split("&"):
+                    if pair.startswith("id="):
+                        sid = int(pair[3:] or 0)
+                self._json(200, {"messages": session_messages(sid)})
+                return
+
             if path == "/api/settings":
                 from . import licensing
 
@@ -292,6 +303,27 @@ def make_handler(state: DashboardState) -> type:
                     str(payload.get("confirm_id", "")), bool(payload.get("approved", False))
                 )
                 self._json(200 if answered else 404, {"answered": answered})
+                return
+
+            if path == "/api/resume":
+                # Mark XXII - the Record: /resume for the browser console
+                from .conversations import session_messages
+
+                target = int(payload.get("id", 0))
+                recorded = session_messages(target)
+                if not recorded:
+                    self._json(404, {"error": f"session #{target} has no messages"})
+                    return
+                state.agent.reset()
+                for entry in recorded:
+                    role = entry["role"]
+                    if role in ("user", "assistant"):
+                        state.agent.messages.append({"role": role, "content": entry["content"]})
+                state.push_event(
+                    "status",
+                    {"text": f"resumed session #{target} - {len(recorded)} messages back in context"},
+                )
+                self._json(200, {"resumed": target, "messages": len(recorded)})
                 return
 
             if path == "/api/memory/save":

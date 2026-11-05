@@ -45,6 +45,8 @@ ANDROID — PHONE HUD
    settings (stored in the encrypted keystore on-device).
 4. Optional (PRO): DESK connects to your desktop over the LAN - run
    "jarvis serve" on the PC and enter its address + token in the launcher.
+   The full agent runs there with APPROVE/DENY on your phone, and your
+   desktop conversation history is readable from the launcher.
 
 --------------------------------------------------------------------
 EVERYDAY COMMANDS

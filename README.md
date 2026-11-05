@@ -75,9 +75,9 @@ jarvis import backup.json           # restores into the active profile (merge, n
 | Surface | Command |
 |---|---|
 | Desktop CLI (all tools, confirmations) | `umbra` / `jarvis` / `python -m jarvis` |
-| Phone HUD ([launcher repo](https://github.com/UmberAeternum/jarvis-launcher)) | APK from releases; DESK ⌁ connects to the Bridge |
+| Phone HUD ([launcher repo](https://github.com/UmberAeternum/jarvis-launcher)) | APK from releases; DESK ⌁ = full agent over the LAN + session history |
 | Avatar (web face with lip sync) | `jarvis face` |
-| **Dashboard** (local web mission control: **full agent** with tools + in-browser APPROVE/DENY, Oracle, memory, kanban, watchtower, settings) | `jarvis dashboard` |
+| **Dashboard** (local web mission control: **full agent** with tools + in-browser APPROVE/DENY, session resume, Oracle, memory, kanban, watchtower, settings) | `jarvis dashboard` |
 | Portal (WebXR room for headsets) | `jarvis portal` |
 | Sentinel (proactive daemon) | `jarvis sentinel` |
 | The Oracle (health report) | `jarvis health` |

@@ -202,6 +202,29 @@ def make_handler(state: BridgeState) -> type:
                     "application/json",
                 )
                 return
+            if path == "/api/history":
+                # Mark XXII - the Record: the Second Mind reaches the phone
+                from .conversations import list_sessions
+
+                self._send(
+                    200,
+                    json.dumps({"sessions": list_sessions(20)}).encode("utf-8"),
+                    "application/json",
+                )
+                return
+            if path == "/api/session":
+                from .conversations import session_messages
+
+                sid = 0
+                for pair in query.split("&"):
+                    if pair.startswith("id="):
+                        sid = int(pair[3:] or 0)
+                self._send(
+                    200,
+                    json.dumps({"messages": session_messages(sid)}).encode("utf-8"),
+                    "application/json",
+                )
+                return
             self._send(404, b"not found", "text/plain")
 
         def do_POST(self) -> None:  # noqa: N802 - stdlib naming

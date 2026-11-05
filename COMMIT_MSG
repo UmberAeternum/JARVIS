@@ -1,28 +1,17 @@
-Mark XXI: the dashboard becomes the full agent console
+Mark XXII: the Record (session history everywhere)
 
-The console tab previously ran a plain chat completion - no tools, no
-gate. It now runs the SAME agent as the CLI: all 24 tools, the same
-confirmation gate, the same persona and system prompt.
+The Second Mind was CLI-only to read; now every surface can reach it.
 
-- dashboard.py: DashboardState rebuilt on the Mark IX bridge pattern,
-  minus the network - 127.0.0.1 only, no token. POST /api/chat starts a
-  worker-thread turn; progress flows as events (user/status/
-  confirm_request/reply) polled from GET /api/events (bounded long-poll);
-  POST /api/confirm answers the gate (120s timeout = denied). Registry
-  honors the same LITE/PRO flags as the CLI (screen control, watchtower).
-  One turn at a time (409 when busy); events capped at 600.
-- Mark XV parity: every dashboard turn is logged to the local
-  conversation store as a "Dashboard session", so /history and
-  history_search see web-console turns too.
-- dashboard_page.py: chat tab rewired to the event stream - tool status
-  lines, the reply stream, and an in-browser APPROVE/DENY banner; the
-  event poll starts at boot and survives tab switches.
-- Settings save rebuilds the agent's brain chain (previous behavior
-  preserved: blank key field keeps the stored key).
-- Tests: full round-trip with a fake brain chain and a custom gated tool
-  - approve path (confirm_request -> approve -> reply + status line),
-  deny path (refusal -> BLOCKED reply), memory/kanban/license endpoints
-  alongside the agent, conversation-store logging, settings key
-  preservation; page markers now include /api/events, /api/confirm,
-  APPROVE/DENY.
-- Version 3.8.0.
+- Bridge: GET /api/history (recent sessions) and GET /api/session?id=N
+  (one session's messages) - token-gated like every bridge endpoint, so
+  the phone can browse desktop conversation history.
+- Dashboard: GET /api/session?id=N plus POST /api/resume {id} - the
+  browser equivalent of /resume: resets the live agent and loads a
+  recorded session back into context, with a status event in the stream.
+  Unknown/empty sessions return 404.
+- dashboard_page.py: PAST SESSIONS rows gain a RESUME button that loads
+  the session into the console and reports it in the event stream.
+- Launcher v1.3 (separate repo) consumes the bridge endpoints.
+- Tests: bridge history token gate + ordering + message read; dashboard
+  session read, resume-into-agent (roles and content verified), 404s.
+- Version 3.9.0.

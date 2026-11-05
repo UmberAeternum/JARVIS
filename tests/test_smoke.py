@@ -105,7 +105,7 @@ class FakeBrain:
 
 
 def version_string() -> None:
-    expect(__version__ == "3.8.0", __version__)
+    expect(__version__ == "3.9.0", __version__)
 
 
 def registry_built() -> None:
@@ -1912,6 +1912,86 @@ def export_import_roundtrip(tmp: Path) -> None:
         config._base_dir = original_base
 
 
+def history_endpoints_and_resume(tmp: Path) -> None:
+    """Mark XXII - the Record: session history on the Bridge and dashboard."""
+    import http.client
+
+    from jarvis import conversations as conv, dashboard as dash
+    from jarvis.serve import BridgeState, start_server
+
+    original = config.config_dir
+    config.config_dir = lambda: tmp / "cfgrec"
+    try:
+        conv.start_session("recorded one")  # an empty session
+        sid2 = conv.start_session("recorded two")
+        conv.log_message(sid2, "user", "hello from the record")
+        conv.log_message(sid2, "assistant", "noted, Sir")
+
+        # Bridge: token-gated history endpoints
+        bridge = BridgeState(config.Config(), "tok123", confirm_timeout=5.0)
+        b_server, b_port, b_thread = start_server(bridge, preferred_port=18791)
+        try:
+            conn = http.client.HTTPConnection("127.0.0.1", b_port, timeout=10)
+            conn.request("GET", "/api/history")
+            resp = conn.getresponse()
+            expect(resp.status == 403, "bridge history must be token-gated")
+            resp.read()
+            conn.request("GET", "/api/history", headers={"X-Jarvis-Token": "tok123"})
+            resp = conn.getresponse()
+            sessions = json.loads(resp.read().decode("utf-8"))["sessions"]
+            expect([s["title"] for s in sessions] == ["recorded two", "recorded one"],
+                   f"bridge history order: {sessions}")
+            conn.request("GET", f"/api/session?id={sid2}",
+                         headers={"X-Jarvis-Token": "tok123"})
+            resp = conn.getresponse()
+            messages = json.loads(resp.read().decode("utf-8"))["messages"]
+            expect(len(messages) == 2 and messages[0]["content"] == "hello from the record",
+                   f"bridge session messages: {messages}")
+            conn.close()
+        finally:
+            b_server.shutdown()
+            b_server.server_close()
+            b_thread.join(timeout=5)
+
+        # Dashboard: resume a recorded session into the live agent
+        dstate = dash.DashboardState(config.Config())
+        d_server, d_port, d_thread = dash.start_server(dstate, preferred_port=0)
+        try:
+            conn = http.client.HTTPConnection("127.0.0.1", d_port, timeout=10)
+            conn.request("GET", f"/api/session?id={sid2}")
+            resp = conn.getresponse()
+            messages = json.loads(resp.read().decode("utf-8"))["messages"]
+            expect(len(messages) == 2, "dashboard session read")
+
+            conn.request("POST", "/api/resume", body=json.dumps({"id": sid2}),
+                         headers={"Content-Type": "application/json"})
+            resp = conn.getresponse()
+            resumed = json.loads(resp.read().decode("utf-8"))
+            expect(resumed == {"resumed": sid2, "messages": 2}, f"resume result: {resumed}")
+            roles = [m["role"] for m in dstate.agent.messages]
+            expect(roles[-2:] == ["user", "assistant"], f"resumed roles: {roles}")
+            expect(dstate.agent.messages[-1]["content"] == "noted, Sir",
+                   "resumed content mismatch")
+
+            conn.request("POST", "/api/resume", body=json.dumps({"id": 999}),
+                         headers={"Content-Type": "application/json"})
+            resp = conn.getresponse()
+            expect(resp.status == 404, "resuming an empty/unknown session must 404")
+            resp.read()
+
+            conn.request("GET", "/api/nope")
+            resp = conn.getresponse()
+            expect(resp.status == 404, "unknown endpoint")
+            resp.read()
+            conn.close()
+        finally:
+            d_server.shutdown()
+            d_server.server_close()
+            d_thread.join(timeout=5)
+    finally:
+        config.config_dir = original
+
+
 def main() -> int:
     check("version string", version_string)
     check("registry builds with 22 tools", registry_built)
@@ -1965,6 +2045,7 @@ def main() -> int:
     check("diagnostics bundle + crash report", lambda: diagnostics_bundle_and_crash(tmp_path))
     check("profiles isolation", lambda: profiles_isolation(tmp_path))
     check("export/import round-trip", lambda: export_import_roundtrip(tmp_path))
+    check("history endpoints + resume", lambda: history_endpoints_and_resume(tmp_path))
 
     check("BrainChain failover", chain_failover)
     check("BrainChain non-transient raises", chain_non_transient_raises)
