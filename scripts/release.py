@@ -177,7 +177,8 @@ def write_sums(artifacts: list[Path]) -> Path:
         digest = hashlib.sha256(artifact.read_bytes()).hexdigest()
         lines.append(f"{digest}  {artifact.name}")
     out = DIST / "SHA256SUMS"
-    out.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    # LF endings only: CRLF makes `sha256sum -c` fail on Linux and Git Bash
+    out.write_text("\n".join(lines) + "\n", encoding="utf-8", newline="\n")
     return out
 
 
