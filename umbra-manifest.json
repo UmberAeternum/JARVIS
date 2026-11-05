@@ -1,9 +1,9 @@
 {
   "payload": {
-    "version": "3.7.0",
+    "version": "3.8.0",
     "channel": "stable",
-    "notes": "Mission Control dashboard, onboarding wizard + settings, signed update checker, diagnostics bundle, profiles + export/import, release automation.",
-    "url": "https://github.com/UmberAeternum/JARVIS/releases/tag/v3.7.0"
+    "notes": "The Dashboard is now the full agent console: all 24 tools with in-browser APPROVE/DENY confirmations, live tool status, and dashboard turns recorded in your local conversation history. Also in this line: onboarding wizard + settings, signed update checker, diagnostics bundle, profiles + export/import, release automation.",
+    "url": "https://github.com/UmberAeternum/JARVIS/releases/tag/v3.8.0"
   },
-  "signature": "43dii17EtCr9hdSqezz/dyJKbiD/OmDHA8SW+aVq5lt5yvBxuxKJm74/cmcrs0L5VoxgQJko27oCz1tB1qvACQ=="
+  "signature": "F2I2yMTmTVnz+Xkj9V4yvcUjbA4YQJ6k1xD9JQRBNcgFYpYewm0yPFaVm03g9NOFFZueCYravBt8FMa3lY69Dw=="
 }
