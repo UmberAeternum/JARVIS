@@ -1,17 +1,17 @@
-Mark XXII: the Record (session history everywhere)
+Mark XXIII: the living reply (streamed dashboard + spoken answers)
 
-The Second Mind was CLI-only to read; now every surface can reach it.
+The console showed only final replies; now it streams like the CLI.
 
-- Bridge: GET /api/history (recent sessions) and GET /api/session?id=N
-  (one session's messages) - token-gated like every bridge endpoint, so
-  the phone can browse desktop conversation history.
-- Dashboard: GET /api/session?id=N plus POST /api/resume {id} - the
-  browser equivalent of /resume: resets the live agent and loads a
-  recorded session back into context, with a status event in the stream.
-  Unknown/empty sessions return 404.
-- dashboard_page.py: PAST SESSIONS rows gain a RESUME button that loads
-  the session into the console and reports it in the event stream.
-- Launcher v1.3 (separate repo) consumes the bridge endpoints.
-- Tests: bridge history token gate + ordering + message read; dashboard
-  session read, resume-into-agent (roles and content verified), 404s.
-- Version 3.9.0.
+- dashboard.py: the turn worker passes an on_text_delta callback to the
+  agent (streaming path when the brain supports it, fallback otherwise)
+  and pushes throttled "partial" events - one per 0.4s, not per token -
+  so the event cap stays meaningful (raised 600 -> 1200).
+- dashboard_page.py: a streaming bubble renders each partial with a
+  caret and is replaced by the final reply event; the SPEAK toggle uses
+  the browser's own speechSynthesis (on-device, no audio leaves the
+  machine), strips markdown/code blocks before speaking, skips error
+  replies, and remembers the preference in localStorage.
+- Tests: streaming round-trip with FakeStreamChain - partials arrive,
+  grow monotonically, and the final reply matches; page carries the
+  streaming + speechSynthesis + SPEAK hooks.
+- Version 3.10.0.

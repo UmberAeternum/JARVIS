@@ -105,7 +105,7 @@ class FakeBrain:
 
 
 def version_string() -> None:
-    expect(__version__ == "3.9.0", __version__)
+    expect(__version__ == "3.10.0", __version__)
 
 
 def registry_built() -> None:
@@ -1323,7 +1323,12 @@ def dashboard_server_roundtrip(tmp: Path) -> None:
             FakeResp(FakeMsg("", tool_calls=[fake_tool_call("t1", "dash_gated", "{}")])),
             FakeResp(FakeMsg("gated action complete, Sir")),
         ])
-        state.agent.chain = types.SimpleNamespace(create_chat=lambda **kw: next(tool_responses))
+        state.agent.chain = types.SimpleNamespace(
+            create_chat=lambda **kw: next(tool_responses),
+            # Mark XXIII: the dashboard always streams, so the fake brain
+            # needs the streaming path too (same response objects)
+            create_chat_stream=lambda **kw: next(tool_responses),
+        )
 
         def gated_action() -> str:
             return "ran" if state.confirm("Run the gated dashboard action?") else "BLOCKED"
@@ -1402,7 +1407,10 @@ def dashboard_server_roundtrip(tmp: Path) -> None:
                 FakeResp(FakeMsg("", tool_calls=[fake_tool_call("t2", "dash_gated", "{}")])),
                 FakeResp(FakeMsg("BLOCKED - the user refused, Sir.")),
             ])
-            state.agent.chain = types.SimpleNamespace(create_chat=lambda **kw: next(tool_responses2))
+            state.agent.chain = types.SimpleNamespace(
+                create_chat=lambda **kw: next(tool_responses2),
+                create_chat_stream=lambda **kw: next(tool_responses2),
+            )
             conn.request("POST", "/api/chat", body=json.dumps({"text": "try again"}),
                          headers={"Content-Type": "application/json"})
             resp = conn.getresponse()
@@ -1992,6 +2000,64 @@ def history_endpoints_and_resume(tmp: Path) -> None:
         config.config_dir = original
 
 
+def dashboard_streaming_roundtrip(tmp: Path) -> None:
+    """Mark XXIII - the living reply: partial events stream to the page."""
+    import http.client
+
+    from jarvis import dashboard as dash
+
+    original = config.config_dir
+    config.config_dir = lambda: tmp / "cfgstream"
+    try:
+        state = dash.DashboardState(config.Config())
+        state.agent.chain = FakeStreamChain(["Hel", "lo, ", "Sir"], "Hello, Sir")
+        server, port, thread = dash.start_server(state, preferred_port=0)
+        conn = http.client.HTTPConnection("127.0.0.1", port, timeout=10)
+        try:
+            conn.request("POST", "/api/chat", body=json.dumps({"text": "greet"}),
+                         headers={"Content-Type": "application/json"})
+            resp = conn.getresponse()
+            started = json.loads(resp.read().decode("utf-8"))
+            expect(started.get("started") is True, f"expected started: {started}")
+
+            deadline = time.time() + 10
+            partials: list[str] = []
+            reply = None
+            last = 0
+            while time.time() < deadline and reply is None:
+                conn.request("GET", f"/api/events?since={last}")
+                resp = conn.getresponse()
+                data = json.loads(resp.read().decode("utf-8"))
+                for event in data["events"]:
+                    if event["type"] == "partial":
+                        partials.append(event["text"])
+                    elif event["type"] == "reply":
+                        reply = event["text"]
+                    if event["id"] > last:
+                        last = event["id"]
+                if reply is None:
+                    time.sleep(0.2)
+            expect(reply == "Hello, Sir", f"unexpected reply: {reply}")
+            expect(bool(partials), "no partial events streamed")
+            expect(all(len(a) <= len(b) for a, b in zip(partials, partials[1:])),
+                   f"partials not monotonic: {partials}")
+            expect(partials[-1].startswith("Hello"), f"last partial odd: {partials[-1]!r}")
+
+            # the page knows how to stream and how to speak
+            from jarvis.dashboard_page import PAGE
+
+            expect("partial" in PAGE and "speechSynthesis" in PAGE and "SPEAK" in PAGE,
+                   "page streaming/speak hooks missing")
+        finally:
+            conn.close()
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=5)
+        expect(not thread.is_alive(), "dashboard thread should stop")
+    finally:
+        config.config_dir = original
+
+
 def main() -> int:
     check("version string", version_string)
     check("registry builds with 22 tools", registry_built)
@@ -2046,6 +2112,7 @@ def main() -> int:
     check("profiles isolation", lambda: profiles_isolation(tmp_path))
     check("export/import round-trip", lambda: export_import_roundtrip(tmp_path))
     check("history endpoints + resume", lambda: history_endpoints_and_resume(tmp_path))
+    check("dashboard streaming round-trip", lambda: dashboard_streaming_roundtrip(tmp_path))
 
     check("BrainChain failover", chain_failover)
     check("BrainChain non-transient raises", chain_non_transient_raises)

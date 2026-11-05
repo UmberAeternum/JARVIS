@@ -4,7 +4,7 @@ Pure HTML/CSS/JS in one string - no build step, no external assets, matching
 the HUD visual language of the avatar and portal clients.
 """
 
-PAGE = """<!doctype html>
+PAGE = r"""<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
@@ -94,6 +94,8 @@ PAGE = """<!doctype html>
   .toast.bad { border-color: var(--bad); color: var(--bad); }
   .kicker { color: var(--dim); font-size: 11px; letter-spacing: 0.2em; margin: 10px 0 4px; }
   .statusline { color: var(--dim); font-size: 11px; padding: 1px 4px; align-self: flex-start; }
+  .msg.streaming { opacity: 0.85; }
+  .mini.on { color: var(--ok); border-color: rgba(74, 222, 128, 0.5); }
   .confirm {
     align-self: stretch; border: 1px solid var(--amber); border-radius: 8px;
     background: rgba(255, 179, 0, 0.07); padding: 10px 12px; margin: 4px 0;
@@ -124,11 +126,12 @@ PAGE = """<!doctype html>
   <section id="tab-chat" class="active">
     <div class="card">
       <h3>CONSOLE - FULL AGENT</h3>
-      <div class="muted" style="margin-bottom:8px">All tools live. Dangerous actions ask here, as APPROVE/DENY. Every turn is logged to your local conversation store.</div>
+      <div class="muted" style="margin-bottom:8px">All tools live. Dangerous actions ask here, as APPROVE/DENY. Every turn is logged to your local conversation store. SPEAK uses your browser's own voice - on-device only.</div>
       <div id="chatlog"></div>
       <div class="row">
         <input id="chatinput" placeholder="Command the agent, Sir... (Enter to send)" autocomplete="off">
         <button class="act" onclick="sendChat()">SEND</button>
+        <button id="speakbtn" class="mini" onclick="toggleSpeak()">SPEAK: OFF</button>
       </div>
     </div>
     <div class="card">
@@ -301,9 +304,52 @@ function answerConfirm(id, approved) {
   if (banner) banner.remove();
   api("/api/confirm", { confirm_id: id, approved: approved });
 }
+/* Mark XXIII - the living reply: streaming bubble + on-device speech */
+var streamingEl = null;
+function finishStreaming() {
+  if (streamingEl) { streamingEl.remove(); streamingEl = null; }
+}
+var speakOn = false;
+try { speakOn = localStorage.getItem("umbra-speak") === "1"; } catch (e) {}
+function toggleSpeak() {
+  speakOn = !speakOn;
+  try { localStorage.setItem("umbra-speak", speakOn ? "1" : "0"); } catch (e) {}
+  var b = $("speakbtn");
+  b.textContent = speakOn ? "SPEAK: ON" : "SPEAK: OFF";
+  b.className = "mini" + (speakOn ? " on" : "");
+  if (!speakOn && window.speechSynthesis) speechSynthesis.cancel();
+}
+function stripMarkdown(text) {
+  var out = String(text);
+  out = out.replace(/```[\s\S]*?```/g, " code block omitted. ");
+  out = out.replace(/`([^`]*)`/g, "$1");
+  out = out.replace(/!?\[([^\]]*)\]\(([^)]*)\)/g, "$1");
+  out = out.replace(/(\*\*|__)(.*?)\1/g, "$2");
+  out = out.replace(/(\*|_)([^*_]+)\1/g, "$2");
+  out = out.replace(/^#{1,6}\s+/gm, "");
+  return out;
+}
+function speak(text) {
+  if (!window.speechSynthesis) return;
+  var utterance = new SpeechSynthesisUtterance(stripMarkdown(text).slice(0, 600));
+  speechSynthesis.speak(utterance);
+}
 function applyEvent(ev) {
-  if (ev.type === "user") addMsg("user", ev.text);
-  else if (ev.type === "reply") addMsg("bot", ev.text);
+  if (ev.type === "user") { finishStreaming(); addMsg("user", ev.text); }
+  else if (ev.type === "partial") {
+    if (!streamingEl) {
+      streamingEl = document.createElement("div");
+      streamingEl.className = "msg bot streaming";
+      $("chatlog").appendChild(streamingEl);
+    }
+    streamingEl.textContent = ev.text + " ▌";
+    $("chatlog").scrollTop = $("chatlog").scrollHeight;
+  }
+  else if (ev.type === "reply") {
+    finishStreaming();
+    addMsg("bot", ev.text);
+    if (speakOn && ev.text.indexOf("ERROR:") !== 0) speak(ev.text);
+  }
   else if (ev.type === "status") addStatus(ev.text);
   else if (ev.type === "confirm_request") showConfirm(ev.confirm_id, ev.description);
 }
@@ -484,6 +530,10 @@ function refreshState() {
 }
 
 /* boot */
+(function initSpeak() {
+  var b = $("speakbtn");
+  if (speakOn) { b.textContent = "SPEAK: ON"; b.className = "mini on"; }
+})();
 refreshState();
 loadSessions();
 pollEvents();
