@@ -1,9 +1,9 @@
 {
   "payload": {
-    "version": "3.11.0",
+    "version": "3.12.0",
     "channel": "stable",
-    "notes": "The Bridge streams: the phone's DESK panel now shows answers as they form, matching the dashboard. Session history on the phone, session resume in the browser, full 24-tool agent everywhere.",
-    "url": "https://github.com/UmberAeternum/JARVIS/releases/tag/v3.11.0"
+    "notes": "The Portal speaks: the WebXR room now runs the full 24-tool agent - streamed replies on the chat panel and APPROVE/DENY confirmations in the room. Every surface - desk CLI, browser dashboard, phone HUD, bridge panel, avatar and headset - shares one brain, one gate, one stream.",
+    "url": "https://github.com/UmberAeternum/JARVIS/releases/tag/v3.12.0"
   },
-  "signature": "eqAbd+THBI5F/5YtDRfG5xrjSYrgeTSDdhE39NuuD2kIiDVyU+q3wa/Dv5PHdf+Nl1xH7+JB6dIL66fhaiwYDA=="
+  "signature": "EuXQD6L/ldKjYWst5CoP2i4jSn+zEyLBrH8Rzd3qW3X8kLilC9l99U/RDo6efKeqcx9giZTnaJ3e6LgPVnMNBw=="
 }
