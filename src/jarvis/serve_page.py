@@ -25,6 +25,7 @@ PAGE_BRIDGE = r"""<!DOCTYPE html>
          border:1px solid; white-space:pre-wrap; }
   .user { align-self:flex-end; color:var(--amber); border-color:#FFB45466; background:#FFB45414; }
   .reply { align-self:flex-start; color:var(--cyan); border-color:#66F0FF55; background:#0E223388; }
+  .streaming { opacity:.85; }
   .status { align-self:center; color:var(--dim); font-size:11px; border:none; background:none; }
   .err { align-self:flex-start; color:#FF6B6B; border-color:#FF6B6B66; }
   #confirm { display:none; margin:10px 12px 0; padding:12px;
@@ -70,6 +71,8 @@ const TOKEN = new URLSearchParams(location.search).get("t") || "";
 let since = 0;
 let thinking = false;
 let pendingConfirm = null;
+let streamingEl = null;
+function finishStreaming() { if (streamingEl) { streamingEl.remove(); streamingEl = null; } }
 
 function bubble(cls, text) {
   const div = document.createElement("div");
@@ -122,8 +125,21 @@ async function pollLoop() {
       stateLine.textContent = data.last > since ? ("live - event " + data.last) : "listening...";
       for (const event of data.events) {
         since = Math.max(since, event.id);
-        if (event.type === "user") bubble("user", event.text);
-        else if (event.type === "reply") { thinking = false; sendBtn.disabled = false; bubble("reply", event.text); }
+        if (event.type === "user") { finishStreaming(); bubble("user", event.text); }
+        else if (event.type === "partial") {
+          if (!streamingEl) {
+            streamingEl = document.createElement("div");
+            streamingEl.className = "msg reply streaming";
+            transcript.appendChild(streamingEl);
+          }
+          streamingEl.textContent = event.text + " ▌";
+          transcript.scrollTop = transcript.scrollHeight;
+        }
+        else if (event.type === "reply") {
+          thinking = false; sendBtn.disabled = false;
+          finishStreaming();
+          bubble("reply", event.text);
+        }
         else if (event.type === "status") bubble("status", event.text);
         else if (event.type === "confirm_request") showConfirm(event.confirm_id, event.description);
       }

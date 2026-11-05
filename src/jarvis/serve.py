@@ -22,6 +22,7 @@ from __future__ import annotations
 import json
 import secrets
 import threading
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 from . import config
@@ -33,7 +34,8 @@ from .tools import default_registry
 
 DEFAULT_PORT = 8772
 CONFIRM_TIMEOUT_S = 120
-MAX_EVENTS = 600
+MAX_EVENTS = 1200  # partial events stream alongside the regular ones
+PARTIAL_INTERVAL_S = 0.4  # throttle: one partial event per interval, not per token
 
 
 class BridgeState:
@@ -132,7 +134,18 @@ class BridgeState:
 
             def worker() -> None:
                 try:
-                    reply = self.agent.run_turn(text)
+                    # Mark XXIV - the Bridge streams, same as the dashboard
+                    buffer = {"text": ""}
+                    last_push = {"at": 0.0}
+
+                    def on_delta(piece: str) -> None:
+                        buffer["text"] += piece
+                        now = time.monotonic()
+                        if now - last_push["at"] >= PARTIAL_INTERVAL_S:
+                            last_push["at"] = now
+                            self.push_event("partial", {"text": buffer["text"]})
+
+                    reply = self.agent.run_turn(text, on_text_delta=on_delta)
                     self.push_event("reply", {"text": reply})
                 except Exception as exc:
                     self.push_event("reply", {"text": f"ERROR: {type(exc).__name__}: {exc}"})

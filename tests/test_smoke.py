@@ -105,7 +105,7 @@ class FakeBrain:
 
 
 def version_string() -> None:
-    expect(__version__ == "3.10.0", __version__)
+    expect(__version__ == "3.11.0", __version__)
 
 
 def registry_built() -> None:
@@ -521,7 +521,12 @@ def bridge_confirm_and_events(tmp: Path) -> None:
         FakeResp(FakeMsg("", tool_calls=[fake_tool_call("t1", "bridge_gated", "{}")])),
         FakeResp(FakeMsg("gated action complete, Sir")),
     ])
-    chain = types.SimpleNamespace(create_chat=lambda **kwargs: next(tool_responses))
+    # the bridge always streams (on_text_delta is passed), so the fake must
+    # implement create_chat_stream - there is no create_chat fallback
+    chain = types.SimpleNamespace(
+        create_chat=lambda **kwargs: next(tool_responses),
+        create_chat_stream=lambda **kwargs: next(tool_responses),
+    )
     state = BridgeState(config.Config(), "testtoken456", confirm_timeout=5.0)
     state.agent.chain = chain  # route the agent through the fake responses
 
@@ -599,7 +604,10 @@ def bridge_confirm_and_events(tmp: Path) -> None:
             FakeResp(FakeMsg("", tool_calls=[fake_tool_call("t2", "bridge_gated", "{}")])),
             FakeResp(FakeMsg("BLOCKED - the user refused, Sir.")),
         ])
-        state.agent.chain = types.SimpleNamespace(create_chat=lambda **kw: next(tool_responses2))
+        state.agent.chain = types.SimpleNamespace(
+            create_chat=lambda **kw: next(tool_responses2),
+            create_chat_stream=lambda **kw: next(tool_responses2),
+        )
         connection.request(
             "POST", "/api/command",
             body=json.dumps({"text": "try again"}),
@@ -2058,6 +2066,57 @@ def dashboard_streaming_roundtrip(tmp: Path) -> None:
         config.config_dir = original
 
 
+def bridge_streaming_roundtrip(tmp: Path) -> None:
+    """Mark XXIV - the Bridge streams partials like the dashboard."""
+    import http.client
+
+    from jarvis.serve import PAGE_BRIDGE, BridgeState, start_server
+
+    expect("partial" in PAGE_BRIDGE and "streaming" in PAGE_BRIDGE,
+           "bridge page streaming hooks missing")
+
+    state = BridgeState(config.Config(), "streamtok", confirm_timeout=5.0)
+    state.agent.chain = FakeStreamChain(["Hel", "lo, ", "Sir"], "Hello, Sir")
+
+    server, port, thread = start_server(state, preferred_port=18783)
+    try:
+        conn = http.client.HTTPConnection("127.0.0.1", port, timeout=10)
+        conn.request("POST", "/api/command",
+                     body=json.dumps({"text": "greet"}),
+                     headers={"X-Jarvis-Token": "streamtok", "Content-Type": "application/json"})
+        resp = conn.getresponse()
+        started = json.loads(resp.read().decode("utf-8"))
+        expect(started.get("started") is True, f"expected started: {started}")
+
+        deadline = time.time() + 10
+        partials: list[str] = []
+        reply = None
+        last = 0
+        while time.time() < deadline and reply is None:
+            conn.request("GET", f"/api/events?since={last}",
+                         headers={"X-Jarvis-Token": "streamtok"})
+            resp = conn.getresponse()
+            data = json.loads(resp.read().decode("utf-8"))
+            for event in data["events"]:
+                if event["type"] == "partial":
+                    partials.append(event["text"])
+                elif event["type"] == "reply":
+                    reply = event["text"]
+                if event["id"] > last:
+                    last = event["id"]
+            if reply is None:
+                time.sleep(0.2)
+        expect(reply == "Hello, Sir", f"unexpected reply: {reply}")
+        expect(bool(partials), "no partial events streamed")
+        expect(all(len(a) <= len(b) for a, b in zip(partials, partials[1:])),
+               f"partials not monotonic: {partials}")
+    finally:
+        conn.close()
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5)
+
+
 def main() -> int:
     check("version string", version_string)
     check("registry builds with 22 tools", registry_built)
@@ -2113,6 +2172,7 @@ def main() -> int:
     check("export/import round-trip", lambda: export_import_roundtrip(tmp_path))
     check("history endpoints + resume", lambda: history_endpoints_and_resume(tmp_path))
     check("dashboard streaming round-trip", lambda: dashboard_streaming_roundtrip(tmp_path))
+    check("bridge streaming round-trip", lambda: bridge_streaming_roundtrip(tmp_path))
 
     check("BrainChain failover", chain_failover)
     check("BrainChain non-transient raises", chain_non_transient_raises)

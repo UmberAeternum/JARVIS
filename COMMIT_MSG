@@ -1,17 +1,17 @@
-Mark XXIII: the living reply (streamed dashboard + spoken answers)
+Mark XXIV: the Bridge streams
 
-The console showed only final replies; now it streams like the CLI.
+The phone showed only final replies; the browser has streamed since
+Mark XXIII. Parity, via the same proven machinery.
 
-- dashboard.py: the turn worker passes an on_text_delta callback to the
-  agent (streaming path when the brain supports it, fallback otherwise)
-  and pushes throttled "partial" events - one per 0.4s, not per token -
-  so the event cap stays meaningful (raised 600 -> 1200).
-- dashboard_page.py: a streaming bubble renders each partial with a
-  caret and is replaced by the final reply event; the SPEAK toggle uses
-  the browser's own speechSynthesis (on-device, no audio leaves the
-  machine), strips markdown/code blocks before speaking, skips error
-  replies, and remembers the preference in localStorage.
-- Tests: streaming round-trip with FakeStreamChain - partials arrive,
-  grow monotonically, and the final reply matches; page carries the
-  streaming + speechSynthesis + SPEAK hooks.
-- Version 3.10.0.
+- serve.py: the bridge turn worker passes on_text_delta to the agent and
+  pushes throttled "partial" events (0.4s interval, one final partial
+  before the reply) - identical pattern to the dashboard. MAX_EVENTS
+  600 -> 1200.
+- serve_page.py: the bridge panel renders partials in a growing bubble
+  with a caret, replaced by the final reply event; the user bubble
+  clears any stale stream.
+- Tests: the bridge confirm/deny fakes now implement create_chat_stream
+  (the agent has no create_chat fallback on the streaming path - Mark
+  XXIII lesson); new bridge streaming round-trip with FakeStreamChain -
+  partials arrive, grow monotonically, final reply matches.
+- Version 3.11.0.
