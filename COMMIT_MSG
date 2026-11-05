@@ -1,28 +1,25 @@
-Mark XIX: profiles + export/import
+Mark XX: release automation + docs
 
-- Profiles are fully isolated per identity: brain config, memories,
-  conversations, health data, reminders, board, watch rules, license and
-  logs. The pre-existing single-profile directory IS the "default" profile
-  - nothing moves, migration is a no-op, no data loss. Other profiles live
-  at <base>/profiles/<name>/; every module already resolves
-  config.config_dir() dynamically, so isolation is automatic. The active
-  profile is recorded in <base>/profile; config.using_profile() provides a
-  scoped override for export/import and tests.
-- jarvis profile list | create <name> | use <name> | delete <name> [--yes]:
-  name validation (1-32 chars, letters/digits/-/_), the default profile can
-  never be deleted, the active profile cannot be deleted under itself,
-  deletion walks the tree explicitly (no shutil.rmtree).
-- jarvis export [--profile name] [--out file] [--include-secrets] and
-  jarvis import <file.json> [--yes] with EXPORT_SCHEMA = 1: the importer
-  refuses unknown schema versions. Secrets are excluded by default;
-  --include-secrets requires an explicit interactive confirmation and the
-  file is chmod 600 on POSIX. License keys are never exported. Import
-  replaces the active profile's config and MERGES memories + conversations
-  (never destroys existing data).
-- config.py: _base_dir()/active_profile()/set_active_profile()/using_profile();
-  existing config_dir() semantics preserved for the default profile.
-- Tests: profile isolation (default == base dir, memory separation,
-  switch round-trip, deletion guards, name validation) and export/import
-  (schema, no secrets by default, file round-trip into a fresh profile,
-  include_secrets carries keys, unknown schema refused).
-- Version 3.6.0.
+- scripts/release.py (stdlib): one command per release. Bumps the version
+  across pyproject.toml + __init__.py + the suite's version assertion, runs
+  the smoke suite (refuses to continue on failure), builds the wheel
+  (pip wheel --no-deps), builds UMBRA.exe via PyInstaller when available
+  (UMBRA.spec; prints the manual step otherwise), scans the wheel for
+  secret material and ABORTS on any hit, writes dist/SHA256SUMS, updates
+  the README releases block (marker-delimited), and emits
+  RELEASE-CHECKLIST.md with publish steps including the never-commit-
+  private-keys rule. --dry-run prints the whole plan and touches nothing.
+  Subprocesses use argument lists, never a shell.
+- SUPPORT.md: troubleshooting table, where every data file lives, the
+  diagnostics bundle flow (what is included/redacted), opt-in crash
+  reporting, the health disclaimer, and the support/refund policy aligned
+  with the EULA (LICENSE).
+- install-instructions.txt (repo): Windows standalone exe, source install,
+  Android sideload, the first-run wizard + non-interactive setup, all
+  Mark XVI-XX commands (dashboard, settings, profiles, export/import,
+  update check, diagnostics), LITE/PRO summary.
+- docs/index.html (storefront): 24-tool desktop agent, new DASHBOARD card,
+  LITE rows for dashboard/profiles/update+diagnostics, download section
+  mentions the wizard, settings, profiles and the signed update checker.
+- README: Releases section (marker block for release.py) + SUPPORT link.
+- Version 3.7.0.

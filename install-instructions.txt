@@ -1,0 +1,92 @@
+UMBRA — INSTALL INSTRUCTIONS
+============================
+
+UMBRA is a local-first AI assistant for your PC (and your pocket). Everything
+stays on your machine: your API key, memories, health data, conversations.
+You bring your own AI provider key (Z.AI GLM, OpenAI, Gemini, Ollama, or any
+OpenAI-compatible endpoint).
+
+--------------------------------------------------------------------
+WINDOWS — STANDALONE (no Python needed)
+--------------------------------------------------------------------
+1. Download UMBRA.exe from the releases page:
+   https://github.com/UmberAeternum/JARVIS/releases
+2. Verify the download (optional but recommended):
+       sha256sum -c SHA256SUMS
+3. Double-click UMBRA.exe (or run it from a terminal).
+4. The setup wizard starts on first run:
+     - pick a provider, paste your API key (validated live, input hidden)
+     - optionally store keys in the OS keychain
+     - optionally enable voice input and spoken replies
+     - optionally activate a PRO license key
+5. Chat. Type /tools to see everything UMBRA can do.
+
+Non-interactive setup (CI / scripting):
+   jarvis setup --yes --provider zai --api-key <KEY>
+   jarvis setup --yes --local            (Ollama at localhost:11434)
+The key can come from the UMBRA_API_KEY environment variable instead of the
+command line. Secrets are never echoed - only masked previews are shown.
+
+--------------------------------------------------------------------
+WINDOWS / LINUX — FROM SOURCE (Python 3.10+)
+--------------------------------------------------------------------
+1. git clone https://github.com/UmberAeternum/JARVIS.git
+2. cd JARVIS
+3. pip install .            (extras: pip install ".[all]" for voice+vision)
+4. Run:  umbra   (or: python -m jarvis)
+
+--------------------------------------------------------------------
+ANDROID — PHONE HUD
+--------------------------------------------------------------------
+1. Download UMBRA-launcher-*.apk from:
+   https://github.com/UmberAeternum/jarvis-launcher/releases
+2. Sideload the APK (allow install-from-browser when asked).
+3. Set UMBRA as your home screen. Enter your provider key in the HUD
+   settings (stored in the encrypted keystore on-device).
+4. Optional (PRO): DESK connects to your desktop over the LAN - run
+   "jarvis serve" on the PC and enter its address + token in the launcher.
+
+--------------------------------------------------------------------
+EVERYDAY COMMANDS
+--------------------------------------------------------------------
+  jarvis                  chat (all tools, confirmation gates)
+  jarvis dashboard        local web mission control (127.0.0.1 only):
+                          chat, Oracle, memory, kanban, watchtower, settings
+  jarvis setup            re-run the onboarding wizard
+  jarvis settings show    redacted settings dump (keys masked, never printed)
+  jarvis settings set key=value
+  jarvis profile list|create|use|delete
+                          isolated profiles - each with its own brain,
+                          memories, conversations, health data and license
+  jarvis export / import  move data between machines or profiles
+                          (secrets excluded by default)
+  jarvis update check     look for a newer signed release (report-only;
+                          nothing installs itself)
+  jarvis health           the Oracle: HR/HRV risk screening
+  jarvis sentinel         proactive daemon: reminders + morning briefing
+  jarvis face             avatar (web face)      jarvis portal: WebXR room
+  jarvis serve            PRO: full agent over the LAN (phone control)
+  jarvis diagnostics bundle
+                          redacted support bundle to attach to a support
+                          request (no keys, no message bodies by default)
+  jarvis license activate UMBRA-xxxx.yyyy
+  jarvis license status
+
+--------------------------------------------------------------------
+LITE vs PRO
+--------------------------------------------------------------------
+LITE (free): chat, voice, memory, reminders + briefing, Health Oracle,
+/look screenshots, avatar, dashboard, profiles, export/import, update
+checker, diagnostics.
+
+PRO (license key): everything above PLUS live screen sharing, the LAN
+Bridge (phone control), the WebXR Portal, screen control, and the
+Watchtower ambient rules.
+
+--------------------------------------------------------------------
+HELP
+--------------------------------------------------------------------
+Troubleshooting, log locations and support: see SUPPORT.md in the
+repository, or run "jarvis diagnostics bundle" and attach the file.
+Health features are informational heuristics against your own recorded
+baseline - not medical advice. License terms: see LICENSE (EULA).

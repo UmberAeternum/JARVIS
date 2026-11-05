@@ -95,6 +95,16 @@ Local-first: license, memories, health samples, reminders and voice transcriptio
 
 The Oracle is an informational heuristic against your own recorded baseline. It is not medical advice, not a diagnosis, and not a medical device.
 
+## Releases
+
+<!-- RELEASES:BEGIN -->
+- **3.7.0** - jarvis_ai-3.7.0-py3-none-any.whl, UMBRA.exe (see `dist/SHA256SUMS`)
+<!-- RELEASES:END -->
+
+## Support
+
+Troubleshooting, log locations, diagnostics bundles, and the support/refund policy: [SUPPORT.md](SUPPORT.md).
+
 ## License
 
 Proprietary — see [LICENSE](LICENSE) (freemium EULA: LITE free for personal use; PRO per-key). Third-party attributions: [ATTRIBUTIONS.md](ATTRIBUTIONS.md).
