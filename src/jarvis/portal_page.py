@@ -32,6 +32,15 @@ PAGE_XR = r"""<!DOCTYPE html>
   #notice { position:absolute; inset:0; display:flex; align-items:center;
             justify-content:center; text-align:center; padding:30px; font-size:14px;
             color:var(--dim); pointer-events:none; }
+  #confirm { position:absolute; left:10px; right:10px; bottom:64px; display:none;
+             padding:12px; border:1px solid var(--amber); border-radius:10px;
+             background:rgba(5,10,18,0.92); }
+  #confirm .desc { color:var(--amber); font-size:13px; margin-bottom:10px; }
+  #confirm .row { display:flex; gap:10px; }
+  #confirm button { flex:1; padding:10px; border-radius:8px; font-family:inherit;
+                    font-size:13px; letter-spacing:1px; cursor:pointer; }
+  #approve { background:#FFB45422; color:var(--amber); border:1px solid var(--amber); }
+  #deny { background:#FF6B6B22; color:#FF6B6B; border:1px solid #FF6B6B; }
 </style>
 <script type="importmap">
 { "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.169.0/build/three.module.js",
@@ -42,6 +51,10 @@ PAGE_XR = r"""<!DOCTYPE html>
   <div id="hud"><span>J.A.R.V.I.S. PORTAL</span><span id="status">2D FALLBACK</span></div>
   <div id="notice">Loading the room...</div>
   <div id="overlay">
+    <div id="confirm">
+      <div class="desc" id="confirmDesc"></div>
+      <div class="row"><button id="deny">DENY</button><button id="approve">APPROVE</button></div>
+    </div>
     <div id="bar">
       <input id="input" placeholder="Ask J.A.R.V.I.S.">
       <button id="send">SEND</button>
@@ -63,8 +76,6 @@ overlay.style.display = "block";
 
 /* ---------------- state ---------------- */
 let board = {tasks: []};
-const history = [];
-let thinking = false;
 
 async function api(path, body) {
   const response = await fetch(path, {
@@ -240,29 +251,84 @@ function setupController(index) {
 }
 setupController(0); setupController(1);
 
-/* ---------------- chat ---------------- */
+/* ---------------- chat (Mark XXV: full agent, events, approvals) ---------------- */
+let thinking = false;
+let since = 0;
+let placeholderIndex = -1;   // the "..." line awaiting the first event of a turn
+let streamIndex = -1;        // the growing "J: ..." line
+let pendingConfirm = null;
+
+function clearPlaceholder() {
+  if (placeholderIndex < 0) return;
+  chatLines.splice(placeholderIndex, 1);
+  if (streamIndex > placeholderIndex) streamIndex -= 1;
+  placeholderIndex = -1;
+}
+function showConfirm(id, description) {
+  pendingConfirm = id;
+  document.getElementById("confirmDesc").textContent = description;
+  document.getElementById("confirm").style.display = "block";
+}
+function answerConfirm(approved) {
+  if (pendingConfirm === null) return;
+  fetch("/api/confirm", {
+    method: "POST", headers: auth(), body: JSON.stringify({confirm_id: pendingConfirm, approved})
+  });
+  document.getElementById("confirm").style.display = "none";
+  pendingConfirm = null;
+}
+document.getElementById("approve").addEventListener("click", () => answerConfirm(true));
+document.getElementById("deny").addEventListener("click", () => answerConfirm(false));
+
+function speakReply(text) {
+  if ("speechSynthesis" in window) {
+    const utterance = new SpeechSynthesisUtterance(text.slice(0, 400));
+    speechSynthesis.cancel(); speechSynthesis.speak(utterance);
+  }
+}
+
 async function sendChat(text) {
   if (!text.trim() || thinking) return;
   thinking = true;
-  chatLines.push("YOU: " + text);
-  chatLines.push("..."); drawChat();
+  placeholderIndex = chatLines.push("...") - 1;
+  drawChat();
   try {
-    const data = await api("/api/chat", {text: text});
-    chatLines.pop();
-    const reply = data.reply || data.error || "(no response)";
-    chatLines.push("J: " + reply);
-    drawBoard();
-    if ("speechSynthesis" in window) {
-      const utterance = new SpeechSynthesisUtterance(reply);
-      speechSynthesis.cancel(); speechSynthesis.speak(utterance);
-    }
+    await api("/api/chat", {text: text});
   } catch (exc) {
-    chatLines.pop(); chatLines.push("LINK DOWN: " + exc.message);
-  } finally {
+    clearPlaceholder();
+    const busy = String(exc.message).indexOf("409") >= 0;
+    chatLines.push(busy ? "A turn is already running, Sir." : "LINK DOWN: " + exc.message);
     thinking = false; drawChat();
   }
-  drawChat();
 }
+
+async function pollLoop() {
+  while (true) {
+    try {
+      const data = await api("/api/events?since=" + since);
+      for (const event of data.events) {
+        since = Math.max(since, event.id);
+        clearPlaceholder();
+        if (event.type === "user") { chatLines.push("YOU: " + event.text); drawChat(); }
+        else if (event.type === "partial") {
+          if (streamIndex < 0) { chatLines.push(""); streamIndex = chatLines.length - 1; }
+          chatLines[streamIndex] = "J: " + event.text + " ▌";
+          drawChat();
+        }
+        else if (event.type === "reply") {
+          if (streamIndex >= 0) chatLines[streamIndex] = "J: " + event.text;
+          else chatLines.push("J: " + event.text);
+          streamIndex = -1; thinking = false; drawChat(); speakReply(event.text);
+        }
+        else if (event.type === "status") { chatLines.push(">> " + event.text); drawChat(); }
+        else if (event.type === "confirm_request") showConfirm(event.confirm_id, event.description);
+      }
+    } catch (exc) { /* offline - retry */ }
+    await new Promise((resolve) => setTimeout(resolve, 400));
+  }
+}
+pollLoop();
+
 document.getElementById("send").addEventListener("click", () => {
   const field = document.getElementById("input");
   const text = field.value; field.value = ""; sendChat(text);

@@ -28,7 +28,6 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from . import config
 from .agent import Agent
 from .brain import make_brain_chain
-from .portal import lan_address
 from .serve_page import PAGE_BRIDGE
 from .tools import default_registry
 
@@ -303,6 +302,8 @@ def start_server(
 
 def run_bridge(console) -> int:  # pragma: no cover - interactive loop
     from rich.panel import Panel
+
+    from .portal import lan_address  # lazy: portal imports BridgeState from here
 
     cfg = config.Config.load()
     if cfg is None:

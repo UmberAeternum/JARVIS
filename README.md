@@ -78,7 +78,7 @@ jarvis import backup.json           # restores into the active profile (merge, n
 | Phone HUD ([launcher repo](https://github.com/UmberAeternum/jarvis-launcher)) | APK from releases; DESK ⌁ = full agent over the LAN + streamed replies + session history |
 | Avatar (web face with lip sync) | `jarvis face` |
 | **Dashboard** (local web mission control: **full agent** with tools + in-browser APPROVE/DENY, streamed replies, spoken answers, session resume, Oracle, memory, kanban, watchtower, settings) | `jarvis dashboard` |
-| Portal (WebXR room for headsets) | `jarvis portal` |
+| Portal (WebXR room for headsets: **full agent**, streamed replies, APPROVE/DENY, kanban wall, BYO models) | `jarvis portal` |
 | Sentinel (proactive daemon) | `jarvis sentinel` |
 | The Oracle (health report) | `jarvis health` |
 | Diagnostics (redacted support bundle) | `jarvis diagnostics bundle` |

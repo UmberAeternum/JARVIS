@@ -1,4 +1,4 @@
-"""Mark VII - the Portal: a WebXR window into JARVIS, for headsets and phones.
+"""Mark VII - the Portal: a WebXR window into J.A.R.V.I.S., for headsets and phones.
 
 Architecture:
 - A token-gated HTTP server bound to the LAN (0.0.0.0): a headset or phone is
@@ -13,8 +13,9 @@ Architecture:
   philosophy as BYO key and BYO avatar).
 - Text entry in-headset uses the DOM Overlay (supported by Quest Browser);
   the same page also works as a plain 2D fallback in any desktop browser.
-- Chat runs through the configured brain chain (primary + fallback),
-  conversation-only, exactly like the avatar.
+- Mark XXV: chat runs through the FULL agent (all tools, streamed partials,
+  APPROVE/DENY confirmations) - the Mark IX bridge machinery wearing the
+  portal's token gate, not a stripped conversation-only chat.
 
 Verification reality: HTTP contract and storage are tested here; the XR
 rendering itself can only be judged in a headset or WebXR-capable phone.
@@ -30,15 +31,10 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 from . import config
-from .brain import BrainChain, make_brain_chain
 from .portal_page import PAGE_XR
+from .serve import BridgeState
 
 DEFAULT_PORT = 8771
-SYSTEM_PROMPT = (
-    "You are J.A.R.V.I.S., present in the user's room through their headset. "
-    "Address the user as Sir. Replies appear on a floating panel and are short, "
-    "factual and conversational: no markdown, no lists."
-)
 
 KANBAN_DEFAULT = {"tasks": [{"id": 1, "column": "todo", "text": "Welcome to the board, Sir"}]}
 COLUMNS = ("todo", "doing", "done")
@@ -95,33 +91,12 @@ def cycle_task(board: dict, task_id: int) -> dict | None:
     return None
 
 
-class PortalState:
-    """Brain chain + board, shared by the HTTP handler."""
-
-    def __init__(self, chain: BrainChain, token: str):
-        self.chain = chain
-        self.token = token
-        self.history: list[dict] = [{"role": "system", "content": SYSTEM_PROMPT}]
-        self.lock = threading.Lock()
+class PortalState(BridgeState):
+    """Mark XXV: the full agent + event stream + confirmations in the portal -
+    the bridge machinery wearing the portal's token gate."""
 
     def authorized(self, token: str | None) -> bool:
         return bool(token) and secrets.compare_digest(token, self.token)
-
-    def chat(self, text: str) -> dict:
-        text = (text or "").strip()
-        if not text:
-            return {"reply": "", "error": "empty message"}
-        with self.lock:
-            self.history.append({"role": "user", "content": text})
-            try:
-                response = self.chain.create_chat(messages=list(self.history))
-                reply = (response.choices[0].message.content or "").strip()
-                self.history.append({"role": "assistant", "content": reply})
-            except Exception as exc:
-                reply = f"ERROR: {type(exc).__name__}: {exc}"
-            if len(self.history) > 41:
-                self.history = [self.history[0]] + self.history[-40:]
-        return {"reply": reply}
 
 
 def make_handler(state: PortalState) -> type:
@@ -162,6 +137,19 @@ def make_handler(state: PortalState) -> type:
             if path == "/api/board":
                 self._send(200, json.dumps(load_board()).encode("utf-8"), "application/json")
                 return
+            if path == "/api/events":
+                since = 0
+                for pair in query.split("&"):
+                    if pair.startswith("since="):
+                        since = int(pair[6:] or 0)
+                events = state.wait_for_events(since, timeout=10.0)
+                last = events[-1]["id"] if events else since
+                self._send(
+                    200,
+                    json.dumps({"events": events, "last": last}).encode("utf-8"),
+                    "application/json",
+                )
+                return
             if path == "/api/health":
                 self._send(200, json.dumps({"ok": True}).encode("utf-8"), "application/json")
                 return
@@ -194,8 +182,27 @@ def make_handler(state: PortalState) -> type:
                 return
 
             if path == "/api/chat":
-                result = state.chat(str(payload.get("text", "")))
-                self._send(200, json.dumps(result).encode("utf-8"), "application/json")
+                text = str(payload.get("text", "")).strip()
+                if not text:
+                    self._send(
+                        400,
+                        json.dumps({"error": "empty message"}).encode("utf-8"),
+                        "application/json",
+                    )
+                    return
+                result = state.run_turn_async(text)
+                code = 200 if "started" in result else 409
+                self._send(code, json.dumps(result).encode("utf-8"), "application/json")
+                return
+            if path == "/api/confirm":
+                answered = state.answer(
+                    str(payload.get("confirm_id", "")), bool(payload.get("approved", False))
+                )
+                self._send(
+                    200 if answered else 404,
+                    json.dumps({"answered": answered}).encode("utf-8"),
+                    "application/json",
+                )
                 return
             if path == "/api/board":
                 action = str(payload.get("action", ""))
@@ -258,7 +265,7 @@ def run_portal(console) -> int:  # pragma: no cover - interactive loop
         )
         return 1
     token = secrets.token_urlsafe(6)
-    state = PortalState(make_brain_chain(cfg), token)
+    state = PortalState(cfg, token)
     try:
         server, port, thread = start_server(state)
     except RuntimeError as exc:
@@ -272,6 +279,8 @@ def run_portal(console) -> int:  # pragma: no cover - interactive loop
             f"[bold cyan]{url}[/]\n\n"
             "Open this URL in the browser of your headset (or phone for AR, or a "
             "desktop browser for the 2D fallback).\n"
+            "The FULL agent answers here - all tools, streamed replies, and\n"
+            "APPROVE/DENY confirmations on the room's confirmation panel.\n"
             f"brain: {cfg.brains.primary.provider} ({cfg.brains.primary.model})\n"
             f"models: drop .glb files into {_models_dir()}\n\n"
             "[yellow]Security:[/] the portal is now reachable from your local "

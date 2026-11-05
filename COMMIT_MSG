@@ -1,17 +1,22 @@
-Mark XXIV: the Bridge streams
+Mark XXV: the Portal speaks
 
-The phone showed only final replies; the browser has streamed since
-Mark XXIII. Parity, via the same proven machinery.
+The XR room was the last surface running a stripped conversation-only
+chat. It now runs the SAME agent as every other body - the last holdout
+falls, and all six surfaces share one brain, one gate, one stream.
 
-- serve.py: the bridge turn worker passes on_text_delta to the agent and
-  pushes throttled "partial" events (0.4s interval, one final partial
-  before the reply) - identical pattern to the dashboard. MAX_EVENTS
-  600 -> 1200.
-- serve_page.py: the bridge panel renders partials in a growing bubble
-  with a caret, replaced by the final reply event; the user bubble
-  clears any stale stream.
-- Tests: the bridge confirm/deny fakes now implement create_chat_stream
-  (the agent has no create_chat fallback on the streaming path - Mark
-  XXIII lesson); new bridge streaming round-trip with FakeStreamChain -
-  partials arrive, grow monotonically, final reply matches.
-- Version 3.11.0.
+- portal.py: PortalState is now a BridgeState subclass (the Mark IX
+  machinery wearing the portal's token gate): full 24-tool agent,
+  worker-thread turns, the event stream, and confirmations. New
+  endpoints: GET /api/events (bounded long-poll), POST /api/confirm;
+  POST /api/chat is now async (started / 409 busy). The plain-chat
+  history and SYSTEM_PROMPT are gone - the Agent composes the persona.
+- portal_page.py: the canvas chat panel renders the event stream -
+  "..." placeholder cleared on the first event, YOU lines from user
+  events, a growing "J: ... ▌" line for partials finalized by the reply,
+  status lines, and an in-room APPROVE/DENY confirmation banner (DOM
+  Overlay, visible in-headset). Replies are spoken as before; errors
+  are not.
+- Tests: portal round-trip now exercises the async turn - partials
+  stream, the final reply matches, page carries the event/confirm/
+  partial hooks. Board and models checks unchanged.
+- Version 3.12.0.

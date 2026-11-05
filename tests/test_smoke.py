@@ -105,7 +105,7 @@ class FakeBrain:
 
 
 def version_string() -> None:
-    expect(__version__ == "3.11.0", __version__)
+    expect(__version__ == "3.12.0", __version__)
 
 
 def registry_built() -> None:
@@ -316,18 +316,20 @@ def portal_server_roundtrip(tmp: Path) -> None:
 def _portal_roundtrip_inner(tmp: Path) -> None:
     from http.client import HTTPConnection
 
+    from jarvis import config as config_module
     from jarvis.portal import PAGE_XR, PortalState, cycle_task, start_server
 
     expect("ENTER VR" in PAGE_XR and "/api/board" in PAGE_XR, "page markers missing")
+    expect("/api/events" in PAGE_XR and "APPROVE" in PAGE_XR and "partial" in PAGE_XR,
+           "portal event/confirm/stream hooks missing")
     expect("127.0.0.1" not in PAGE_XR, "page must not hardcode the host")
     board = {"tasks": [{"id": 5, "column": "done", "text": "wrapped"}]}
     expect(cycle_task(board, 5)["column"] == "todo", "cycle must wrap done -> todo")
 
-    chain = types.SimpleNamespace(
-        create_chat=lambda messages=None, tools=None, tool_choice="auto":
-        FakeResp(FakeMsg("Present and accounted for, Sir"))
-    )
-    state = PortalState(chain, "testtoken123")
+    # Mark XXV: the full agent (bridge machinery) - chain swapped for a fake stream
+    state = PortalState(config_module.Config(), "testtoken123")
+    state.agent.chain = FakeStreamChain(
+        ["Present", " and accounted for, Sir"], "Present and accounted for, Sir")
     server, port, thread = start_server(state, preferred_port=18781)
     try:
         connection = HTTPConnection("127.0.0.1", port, timeout=10)
@@ -376,7 +378,27 @@ def _portal_roundtrip_inner(tmp: Path) -> None:
             headers={"X-Jarvis-Token": "testtoken123", "Content-Type": "application/json"},
         )
         body = json.loads(connection.getresponse().read().decode("utf-8"))
-        expect(body["reply"] == "Present and accounted for, Sir", body)
+        expect(body.get("started") is True, f"expected started, got: {body}")
+
+        deadline = time.time() + 10
+        partials: list[str] = []
+        reply = None
+        last = 0
+        while time.time() < deadline and reply is None:
+            connection.request("GET", f"/api/events?since={last}",
+                               headers={"X-Jarvis-Token": "testtoken123"})
+            resp = connection.getresponse()
+            data = json.loads(resp.read().decode("utf-8"))
+            for event in data["events"]:
+                if event["type"] == "partial":
+                    partials.append(event["text"])
+                elif event["type"] == "reply":
+                    reply = event["text"]
+            last = data.get("last", last)
+            if reply is None:
+                time.sleep(0.2)
+        expect(reply == "Present and accounted for, Sir", f"unexpected reply: {reply}")
+        expect(bool(partials), "no partials streamed in the portal")
     finally:
         server.shutdown()
         server.server_close()
