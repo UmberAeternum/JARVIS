@@ -1,0 +1,9 @@
+{
+  "payload": {
+    "version": "3.7.0",
+    "channel": "stable",
+    "notes": "Mission Control dashboard, onboarding wizard + settings, signed update checker, diagnostics bundle, profiles + export/import, release automation.",
+    "url": "https://github.com/UmberAeternum/JARVIS/releases/tag/v3.7.0"
+  },
+  "signature": "43dii17EtCr9hdSqezz/dyJKbiD/OmDHA8SW+aVq5lt5yvBxuxKJm74/cmcrs0L5VoxgQJko27oCz1tB1qvACQ=="
+}

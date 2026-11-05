@@ -24,7 +24,9 @@ import json
 from . import licensing, safety
 
 DEFAULT_MANIFEST_URL = (
-    "https://github.com/UmberAeternum/JARVIS/releases/latest/download/umbra-manifest.json"
+    # raw.githubusercontent serves the file with a direct 200 - release-asset
+    # URLs 302-redirect to storage, and the guarded fetcher refuses redirects
+    "https://raw.githubusercontent.com/UmberAeternum/JARVIS/main/umbra-manifest.json"
 )
 MAX_MANIFEST_BYTES = 64 * 1024  # a manifest is tiny; anything larger is hostile
 
