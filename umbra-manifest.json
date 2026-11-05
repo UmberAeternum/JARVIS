@@ -1,9 +1,9 @@
 {
   "payload": {
-    "version": "3.9.0",
+    "version": "3.10.0",
     "channel": "stable",
-    "notes": "The Record: your conversation history now follows you \u2014 browse desktop sessions from the phone HUD (LOG) and resume any of them in the browser dashboard, alongside the full agent console with in-browser APPROVE/DENY. Also in this line: onboarding wizard + settings, signed update checker, diagnostics bundle, profiles + export/import.",
-    "url": "https://github.com/UmberAeternum/JARVIS/releases/tag/v3.9.0"
+    "notes": "The living reply: the dashboard console now streams answers token by token and can speak them aloud in your browser's own voice - on-device only, nothing leaves the machine. All 24 tools with in-browser APPROVE/DENY remain, plus session history on the phone (LOG) and session resume in the browser.",
+    "url": "https://github.com/UmberAeternum/JARVIS/releases/tag/v3.10.0"
   },
-  "signature": "0KPeWPLbzNb170gH2hb0OfZTsp7ur423KDv/lxn712eZj/B8wSs9IRO+2/6u6aOAIe6CRjYGd0T/LL3y3Y1iAw=="
+  "signature": "U11PQBRbEruzRbEBtgOlgRyGKrCt5G3L4VMtOThD6b/lVMVA/PalDtNN3tyTI+tL/e81V1LvsqTWA1yc4b9DDg=="
 }
