@@ -48,6 +48,25 @@ jarvis license status
 
 Keys are Ed25519-signed by the publisher — they cannot be forged, and they never leave your machine after activation. See the EULA (`LICENSE`) for terms.
 
+## Profiles
+
+UMBRA supports isolated profiles — each with its own brain config, memories, conversations, health data and license. Your existing data is the `default` profile; nothing moves or migrates.
+
+```bash
+jarvis profile list                 # see profiles, active one marked
+jarvis profile create work
+jarvis profile use work             # switch; first run there starts the wizard
+jarvis profile delete work
+```
+
+Move data between machines or profiles:
+
+```bash
+jarvis export --out backup.json     # secrets excluded by default
+jarvis export --include-secrets     # requires confirmation; the file holds plaintext keys
+jarvis import backup.json           # restores into the active profile (merge, never destroy)
+```
+
 ## The bodies
 
 | Surface | Command |

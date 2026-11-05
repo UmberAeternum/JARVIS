@@ -11,6 +11,7 @@ Launch flags: --voice, --live, --dry-run.
 
 from __future__ import annotations
 
+import json
 import sys
 import threading
 from pathlib import Path
@@ -501,6 +502,9 @@ def _dispatch(argv: list[str] | None = None) -> int:
             "  settings    show | set <key>=<value> | reset [--yes]\n"
             "  update      check - look for a newer signed release\n"
             "  diagnostics bundle [--include-conversations] - redacted support bundle\n"
+            "  profile     list | create <name> | use <name> | delete <name>\n"
+            "  export      [--profile name] [--out file] [--include-secrets]\n"
+            "  import      <file.json> - restore an export into the active profile\n"
             "  license     activate <key> | status - PRO licensing"
         )
         return 0
@@ -567,6 +571,135 @@ def _dispatch(argv: list[str] | None = None) -> int:
             )
             return 1
         return run_bridge(console)
+    if argv and argv[0] == "profile":
+        from .profiles import create_profile, delete_profile, list_profiles, use_profile
+
+        sub = argv[1] if len(argv) > 1 else "list"
+        try:
+            if sub == "list":
+                rows = [
+                    f"  {entry['name']}{' [active]' if entry['active'] else ''}  -  {entry['path']}"
+                    for entry in list_profiles()
+                ]
+                console.print(Panel("\n".join(rows), title="PROFILES", border_style="cyan"))
+                console.print(
+                    "[dim]Each profile has its own brain config, memories, "
+                    "conversations, health data and license.[/]"
+                )
+                return 0
+            if sub == "create":
+                if len(argv) < 3:
+                    console.print("usage: jarvis profile create <name>")
+                    return 1
+                created = create_profile(argv[2])
+                console.print(
+                    f"[green]Profile '{created['name']}' created at[/] {created['path']}\n"
+                    f"[dim]Switch with[/] [bold]jarvis profile use {created['name']}[/]"
+                    " [dim]- the first run there starts the setup wizard.[/]"
+                )
+                return 0
+            if sub == "use":
+                if len(argv) < 3:
+                    console.print("usage: jarvis profile use <name>")
+                    return 1
+                name = use_profile(argv[2])
+                console.print(f"[green]Active profile:[/] {name} (applies to every command from now on)")
+                return 0
+            if sub == "delete":
+                if len(argv) < 3:
+                    console.print("usage: jarvis profile delete <name> [--yes]")
+                    return 1
+                if "--yes" not in argv[3:]:
+                    if not Confirm.ask(
+                        f"Delete profile '{argv[2]}' and ALL of its data?", default=False
+                    ):
+                        console.print("[dim]Aborted.[/]")
+                        return 1
+                name = delete_profile(argv[2])
+                console.print(f"[green]Profile '{name}' deleted.[/]")
+                return 0
+        except ValueError as exc:
+            console.print(f"[red]{exc}[/]")
+            return 1
+        console.print("usage: jarvis profile list | create <name> | use <name> | delete <name> [--yes]")
+        return 1
+    if argv and argv[0] == "export":
+        from .portability import export_profile
+        from .profiles import validate_name
+
+        rest = argv[1:]
+        source = config.active_profile()
+        if "--profile" in rest:
+            index = rest.index("--profile")
+            if index + 1 < len(rest):
+                source = rest[index + 1]
+        try:
+            if source != "default":
+                source = validate_name(source)
+        except ValueError as exc:
+            console.print(f"[red]{exc}[/]")
+            return 1
+        include_secrets = "--include-secrets" in rest
+        if include_secrets and not Confirm.ask(
+            "Include API keys in the export? The file will contain PLAINTEXT secrets.",
+            default=False,
+        ):
+            console.print("[dim]Aborted the secret inclusion - exporting without secrets.[/]")
+            include_secrets = False
+        out_flag: Path | None = None
+        if "--out" in rest:
+            index = rest.index("--out")
+            if index + 1 < len(rest):
+                out_flag = Path(rest[index + 1])
+        stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+        out_path = out_flag or Path(f"umbra-export-{source}-{stamp}.json")
+        with config.using_profile(source):
+            data = export_profile(include_secrets=include_secrets)
+        out_path.write_text(json.dumps(data, indent=2), encoding="utf-8")
+        if sys.platform != "win32" and include_secrets:
+            try:
+                out_path.chmod(0o600)
+            except OSError:
+                pass
+        console.print(
+            Panel(
+                f"[green]Export written:[/] {out_path}\n"
+                f"profile: {source}\n"
+                f"secrets: {'INCLUDED - protect this file' if include_secrets else 'excluded'}\n"
+                f"memories: {len(data['memories'])}  "
+                f"sessions: {len(data['conversations']['sessions'])}",
+                title="EXPORT",
+                border_style="cyan",
+            )
+        )
+        return 0
+    if argv and argv[0] == "import":
+        from .portability import import_profile, validate_export
+
+        rest = argv[1:]
+        candidates = [item for item in rest if not item.startswith("--")]
+        if not candidates:
+            console.print("usage: jarvis import <file.json> [--yes]")
+            return 1
+        source_file = Path(candidates[0])
+        if not source_file.exists():
+            console.print(f"[red]File not found:[/] {source_file}")
+            return 1
+        try:
+            data = json.loads(source_file.read_text(encoding="utf-8"))
+            validate_export(data)
+        except (ValueError, OSError, json.JSONDecodeError) as exc:
+            console.print(f"[red]Invalid export:[/] {exc}")
+            return 1
+        if "--yes" not in rest and not Confirm.ask(
+            "Apply this export's configuration to the ACTIVE profile and add its "
+            "memories and conversations? (existing data is kept; the config is replaced)",
+            default=False,
+        ):
+            console.print("[dim]Aborted.[/]")
+            return 1
+        console.print(f"[green]{import_profile(data)}[/]")
+        return 0
     if argv and argv[0] == "diagnostics":
         from .diagnostics import build_bundle
 

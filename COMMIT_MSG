@@ -1,26 +1,28 @@
-Mark XVIII: diagnostics bundle + opt-in crash reporting
+Mark XIX: profiles + export/import
 
-- jarvis diagnostics bundle [--include-conversations] [--out <file>]
-  writes a zip locally: version/OS/Python, license TIER (never the key),
-  a redacted settings dump, the tail of logs/app.log, and conversation
-  METADATA (ids/titles/turns/started_at). Message bodies are excluded
-  unless --include-conversations is passed - and even then every line
-  goes through the redactor and the transcript is size-capped. License
-  key material never enters the bundle. LITE feature; works before setup.
-- diagnostics.py: redact_text scrubs license keys, API key shapes
-  (sk-/ghp-/xoxp-/AIza/Bearer headers), and emails; log_line appends
-  redacted, size-capped lines to logs/app.log (wired into the sentinel
-  announcer, background update failures, crash reports, and bundle
-  creation); write_crash_report writes a redacted local crash file.
-- Crash reporting is strictly opt-in (diagnostics.crash_reports, default
-  off): cli.main wraps the dispatch and on an unhandled exception either
-  writes the local crash file + prints instructions (opt-in) or preserves
-  the previous behavior exactly by re-raising (opt-out). Nothing is ever
-  uploaded.
-- config: additive DiagnosticsConfig section; schema stays v4; settings
-  show/set cover diagnostics.crash_reports.
-- Tests: redaction (keys, license, emails; ordinary content survives);
-  bundle contents (members present, no key, no bodies by default,
-  metadata included, bodies + redaction with --include-conversations);
-  crash file + log redaction; flag persistence.
-- Version 3.5.0.
+- Profiles are fully isolated per identity: brain config, memories,
+  conversations, health data, reminders, board, watch rules, license and
+  logs. The pre-existing single-profile directory IS the "default" profile
+  - nothing moves, migration is a no-op, no data loss. Other profiles live
+  at <base>/profiles/<name>/; every module already resolves
+  config.config_dir() dynamically, so isolation is automatic. The active
+  profile is recorded in <base>/profile; config.using_profile() provides a
+  scoped override for export/import and tests.
+- jarvis profile list | create <name> | use <name> | delete <name> [--yes]:
+  name validation (1-32 chars, letters/digits/-/_), the default profile can
+  never be deleted, the active profile cannot be deleted under itself,
+  deletion walks the tree explicitly (no shutil.rmtree).
+- jarvis export [--profile name] [--out file] [--include-secrets] and
+  jarvis import <file.json> [--yes] with EXPORT_SCHEMA = 1: the importer
+  refuses unknown schema versions. Secrets are excluded by default;
+  --include-secrets requires an explicit interactive confirmation and the
+  file is chmod 600 on POSIX. License keys are never exported. Import
+  replaces the active profile's config and MERGES memories + conversations
+  (never destroys existing data).
+- config.py: _base_dir()/active_profile()/set_active_profile()/using_profile();
+  existing config_dir() semantics preserved for the default profile.
+- Tests: profile isolation (default == base dir, memory separation,
+  switch round-trip, deletion guards, name validation) and export/import
+  (schema, no secrets by default, file round-trip into a fresh profile,
+  include_secrets carries keys, unknown schema refused).
+- Version 3.6.0.

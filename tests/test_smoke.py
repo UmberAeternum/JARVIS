@@ -105,7 +105,7 @@ class FakeBrain:
 
 
 def version_string() -> None:
-    expect(__version__ == "3.5.0", __version__)
+    expect(__version__ == "3.6.0", __version__)
 
 
 def registry_built() -> None:
@@ -1700,6 +1700,141 @@ def diagnostics_bundle_and_crash(tmp: Path) -> None:
         config.config_dir = original
 
 
+def profiles_isolation(tmp: Path) -> None:
+    from jarvis import profiles
+    from jarvis.memory import recent_notes, save_note
+
+    original_base = config._base_dir
+    config._base_dir = lambda: tmp / "pbase"
+    try:
+        base = tmp / "pbase"
+        base.mkdir(parents=True, exist_ok=True)
+        # the base dir IS the default profile - existing data stays put
+        expect(config.config_dir() == base, "default profile must be the base dir")
+        save_note("default profile memory")
+
+        created = profiles.create_profile("work")
+        expect((base / "profiles" / "work").exists(), "profile dir missing")
+        names = [entry["name"] for entry in profiles.list_profiles()]
+        expect(names == ["default", "work"], f"profile list: {names}")
+
+        with config.using_profile("work"):
+            expect(config.config_dir() == created["path"], "profile dir not selected")
+            expect(recent_notes(10) == [], "work profile must not see default memories")
+            work_cfg = config.Config(brains=config.BrainsConfig(
+                primary=config.BrainConfig(type="local", provider="ollama",
+                                           base_url="http://localhost:11434/v1",
+                                           model="qwen2.5:7b", api_key="local")))
+            work_cfg.save()
+            save_note("work profile memory")
+            expect(any("work profile memory" in n["content"] for n in recent_notes(10)),
+                   "work memory not saved")
+
+        expect(any("default profile memory" in n["content"] for n in recent_notes(10)),
+               "default memory must survive profile switching")
+        expect(not any("work profile memory" in n["content"] for n in recent_notes(10)),
+               "work memory leaked into default")
+
+        profiles.use_profile("work")
+        expect(config.active_profile() == "work", "active profile not recorded")
+        profiles.use_profile("default")
+        expect(config.active_profile() == "default", "default not restorable")
+        expect(not (base / "profile").exists(), "default marker file must be removed")
+
+        for bad_call, expect_msg in (
+            (lambda: profiles.delete_profile("default"), "default"),
+            (lambda: profiles.delete_profile("nope"), "does not exist"),
+        ):
+            try:
+                bad_call()
+            except ValueError as exc:
+                expect(expect_msg in str(exc), str(exc))
+            else:
+                raise AssertionError("deletion guard missing")
+        profiles.use_profile("work")
+        try:
+            profiles.delete_profile("work")
+        except ValueError as exc:
+            expect("active" in str(exc), str(exc))
+        else:
+            raise AssertionError("deleting the active profile must be refused")
+        profiles.use_profile("default")
+        profiles.delete_profile("work")
+        expect(not (base / "profiles" / "work").exists(), "profile not deleted")
+        try:
+            profiles.create_profile("bad name!")
+        except ValueError:
+            pass
+        else:
+            raise AssertionError("invalid profile name must be refused")
+    finally:
+        config._base_dir = original_base
+
+
+def export_import_roundtrip(tmp: Path) -> None:
+    import json as jsonlib
+
+    from jarvis import conversations as conv, portability, profiles
+    from jarvis.memory import recent_notes, save_note
+
+    original_base = config._base_dir
+    config._base_dir = lambda: tmp / "ebase"
+    try:
+        base = tmp / "ebase"
+        base.mkdir(parents=True, exist_ok=True)
+        cfg = config.Config(brains=config.BrainsConfig(
+            primary=config.BrainConfig(type="cloud", provider="zai",
+                                       base_url="https://x/v1", model="glm-x",
+                                       api_key=FAKE_KEY)))
+        cfg.save()
+        save_note("first memory")
+        save_note("second memory")
+        sid = conv.start_session("roundtrip session")
+        conv.log_message(sid, "user", f"the key is {FAKE_KEY}")
+        conv.log_message(sid, "assistant", "noted, Sir")
+
+        data = portability.export_profile(include_secrets=False)
+        serialized = jsonlib.dumps(data)
+        expect(data["schema"] == portability.EXPORT_SCHEMA, "schema missing")
+        # Conversations carry whatever the user typed (the fixture message above
+        # contains the key on purpose, to prove bodies round-trip verbatim), so
+        # the leak guard applies to the CONFIG payload - the section that
+        # include_secrets governs.
+        expect(FAKE_KEY not in jsonlib.dumps(data["config"]),
+               "export leaked the API key in the config")
+        expect(len(data["memories"]) == 2, "memories not exported")
+        expect(data["conversations"]["sessions"], "sessions not exported")
+        expect(data["config"]["brains"]["primary"]["api_key"] == "", "key must be blanked")
+
+        revived = jsonlib.loads(serialized)
+        profiles.create_profile("restored")
+        with config.using_profile("restored"):
+            summary = portability.import_profile(revived)
+            expect("2 memories" in summary and "1 sessions" in summary, summary)
+            restored_cfg = config.Config.load()
+            expect(restored_cfg is not None and restored_cfg.brains.primary.model == "glm-x",
+                   "config not restored")
+            expect(restored_cfg.brains.primary.api_key == "", "secret must not appear")
+            expect(len(recent_notes(10)) == 2, "memories not restored")
+            sessions = conv.list_sessions(10)
+            expect(len(sessions) == 1 and sessions[0]["title"] == "roundtrip session",
+                   f"sessions not restored: {sessions}")
+            messages = conv.session_messages(sessions[0]["id"])
+            expect(len(messages) == 2, "messages not restored")
+
+        data_secret = portability.export_profile(include_secrets=True)
+        expect(FAKE_KEY in jsonlib.dumps(data_secret), "include_secrets must carry the key")
+
+        try:
+            portability.import_profile({"schema": 999})
+        except ValueError as exc:
+            expect("schema" in str(exc), str(exc))
+        else:
+            raise AssertionError("unknown schema must be refused")
+    finally:
+        config._base_dir = original_base
+
+
 def main() -> int:
     check("version string", version_string)
     check("registry builds with 22 tools", registry_built)
@@ -1751,6 +1886,8 @@ def main() -> int:
     check("update check offline + mocked", update_check_offline_and_mocked)
     check("diagnostics redaction", diagnostics_redaction)
     check("diagnostics bundle + crash report", lambda: diagnostics_bundle_and_crash(tmp_path))
+    check("profiles isolation", lambda: profiles_isolation(tmp_path))
+    check("export/import round-trip", lambda: export_import_roundtrip(tmp_path))
 
     check("BrainChain failover", chain_failover)
     check("BrainChain non-transient raises", chain_non_transient_raises)

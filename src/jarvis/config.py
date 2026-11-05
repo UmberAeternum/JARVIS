@@ -1,4 +1,4 @@
-"""Per-user configuration (schema v3), stored in the OS user-config directory.
+"""Per-user configuration (schema v4), stored in the OS user-config directory.
 
 Key material never belongs in the repository. By default the API key lives in
 config.json inside the user's own profile; optionally it is stored in the OS
@@ -7,7 +7,11 @@ case the JSON keeps only metadata. The key is never printed to the console.
 
 v3 adds the voice layer (Mark II): push-to-talk capture, STT, TTS.
 v4 adds the vision layer (Mark III): screen capture, live-attach, watch mode.
-Older configs migrate automatically on load.
+Mark XVII/XVIII add the updates and diagnostics sections additively.
+Mark XIX adds profiles: the base directory IS the "default" profile (existing
+data stays put); other profiles live at <base>/profiles/<name>/ and every
+module picks them up because all of them resolve config.config_dir() here,
+dynamically. Older configs migrate automatically on load.
 """
 
 from __future__ import annotations
@@ -15,20 +19,72 @@ from __future__ import annotations
 import json
 import os
 import sys
+from contextlib import contextmanager
 from dataclasses import dataclass, field, fields
 from datetime import datetime, timezone
 from pathlib import Path
 
 APP_NAME = "jarvis"
 KEYRING_SERVICE = "jarvis"
+DEFAULT_PROFILE = "default"
+
+_profile_override: str | None = None  # set by using_profile()
 
 
-def config_dir() -> Path:
+def _base_dir() -> Path:
+    """The physical root: the original single-profile directory."""
     if sys.platform == "win32":
         base = os.environ.get("APPDATA") or str(Path.home() / "AppData" / "Roaming")
     else:
         base = os.environ.get("XDG_CONFIG_HOME") or str(Path.home() / ".config")
     return Path(base) / APP_NAME
+
+
+def active_profile() -> str:
+    """The recorded active profile; "default" when unset."""
+    if _profile_override is not None:
+        return _profile_override
+    marker = _base_dir() / "profile"
+    try:
+        name = marker.read_text(encoding="utf-8").strip()
+    except OSError:
+        return DEFAULT_PROFILE
+    return name or DEFAULT_PROFILE
+
+
+def set_active_profile(name: str) -> None:
+    """Record the active profile. "default" removes the marker file."""
+    marker = _base_dir() / "profile"
+    if name == DEFAULT_PROFILE:
+        try:
+            marker.unlink()
+        except OSError:
+            pass
+        return
+    marker.parent.mkdir(parents=True, exist_ok=True)
+    marker.write_text(name, encoding="utf-8")
+
+
+@contextmanager
+def using_profile(name: str):
+    """Temporarily resolve config_dir() to the named profile (export/import, tests)."""
+    global _profile_override
+    previous = _profile_override
+    _profile_override = name
+    try:
+        yield
+    finally:
+        _profile_override = previous
+
+
+def config_dir() -> Path:
+    """Directory of the ACTIVE profile: the base dir itself for "default"
+    (so existing data is the default profile - nothing migrates), otherwise
+    <base>/profiles/<name>."""
+    name = active_profile()
+    if name == DEFAULT_PROFILE:
+        return _base_dir()
+    return _base_dir() / "profiles" / name
 
 
 def config_path() -> Path:
