@@ -57,6 +57,41 @@ After an unexpected error you will get a `crash-*.txt` path in the base
 directory — include it (or run `jarvis diagnostics bundle`) when reporting.
 Nothing is ever uploaded automatically.
 
+## The EDITH access protocol
+
+UMBRA's reach — device installs, cross-app attachment, the API's tool
+endpoints — is **denied by default** and unlocks only when you grant it:
+
+```bash
+jarvis access grant --full                        # all tiers, expires in 24h
+jarvis access grant --tiers assist [--window-hours N]
+jarvis access status                              # per-tier view
+jarvis access log                                 # tamper-evident action log
+jarvis access verify                              # check ledger integrity
+jarvis access revoke --all                        # instant, total revoke
+```
+
+- Grants expire (default 24h) and must be re-granted; new devices never
+  inherit them.
+- Every reach attempt — allowed or denied — is written to
+  `access-log.jsonl` with the actor (user/api/overlay) and a chain hash.
+- Tiers: `observe` (status) < `assist` (API chat/tools, overlay attach) <
+  `act` (PRO tools through the API) < `install` (device installs).
+- Every device install asks again for the specific target even under a
+  live grant. `jarvis inject scan` installs nothing, ever.
+
+If `jarvis access verify` reports TAMPERED, the ledger was edited outside
+the product — restore it from a backup or delete `access-log.jsonl` (the
+chain marks prior entries).
+
+## Code signing (status: unsigned builds)
+
+Current artifacts are **not code-signed** — Windows SmartScreen may show
+a warning the first time you run `UMBRA.exe`. Verify downloads with
+`SHA256SUMS` instead. Authenticode signing is planned; the release
+pipeline gates it behind `--sign` with `UMBRA_SIGN_CERT` so signed builds
+replace unsigned ones without changing the workflow.
+
 ## Health disclaimer
 
 The Oracle (HR/HRV screening) is an informational heuristic computed against

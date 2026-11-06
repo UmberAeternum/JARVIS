@@ -187,7 +187,7 @@ def make_handler(state: ApiState) -> type:
                 return
             if path == "/tools":
                 # Phase 1 spine: the tool listing is an assist-tier capability
-                allowed, reason = access_module.authorize("api.tools")
+                allowed, reason = access_module.authorize("api.tools", actor="api")
                 if not allowed:
                     self._json(403, {"error": reason})
                     return
@@ -213,7 +213,7 @@ def make_handler(state: ApiState) -> type:
 
             if path == "/chat":
                 # Phase 1 spine: chat (and its tools) is an assist-tier capability
-                allowed, reason = access_module.authorize("api.chat")
+                allowed, reason = access_module.authorize("api.chat", actor="api")
                 if not allowed:
                     self._json(403, {"error": reason})
                     return

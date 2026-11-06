@@ -107,7 +107,7 @@ class FakeBrain:
 
 
 def version_string() -> None:
-    expect(__version__ == "3.21.0", __version__)
+    expect(__version__ == "3.22.0", __version__)
 
 
 class MockProvider(Provider):
@@ -3016,6 +3016,65 @@ def spine_authorize(tmp: Path) -> None:
         config.config_dir = original
 
 
+def spine_bypass_attempts(tmp: Path) -> None:
+    """Phase 1 follow-through: every bypass path fails; the actor is logged."""
+    from jarvis import access
+
+    original = config.config_dir
+    config.config_dir = lambda: tmp / "cfgbypass"
+    try:
+        # 1. forged state file WITHOUT a matching fingerprint: denied
+        access._save_state({"grants": {"install": {
+            "ts": 0, "expires_ts": time.time() + 9999}},
+            "fingerprint": "forged-fingerprint"})
+        expect(access.full_active() is False, "foreign-fingerprint grant must not activate")
+        allowed, reason = access.authorize("inject.install", target="host")
+        expect(not allowed and "denied" in reason, f"forged state must deny: {reason}")
+
+        # 2. a state file planted with OUR fingerprint still gates by expiry -
+        #    and the only legitimate writer is the typed-phrase grant
+        access._save_state({"grants": {"install": {
+            "ts": 0, "expires_ts": time.time() + 9999}},
+            "fingerprint": access.device_fingerprint()})
+        allowed, _ = access.authorize("inject.install", target="host")
+        expect(allowed, "matching fingerprint + unexpired state = active grant")
+
+        # 3. env-var bypass: no environment variable can create a grant
+        import os as os_mod
+
+        os_mod.environ["UMBRA_FULL_ACCESS"] = "1"
+        os_mod.environ["UMBRA_SKIP_EDITH"] = "1"
+        try:
+            access.revoke_all()
+            expect(access.full_active() is False, "env vars must not grant")
+            allowed, _ = access.authorize("inject.install", target="host")
+            expect(not allowed, "env vars must not bypass authorize")
+        finally:
+            os_mod.environ.pop("UMBRA_FULL_ACCESS", None)
+            os_mod.environ.pop("UMBRA_SKIP_EDITH", None)
+
+        # 4. scope escalation: an assist grant cannot act at the install tier
+        access.grant_tiers(["assist"], access.CONFIRMATION_PHRASE)
+        allowed, reason = access.authorize(
+            "inject.install", scope="install", target="host")
+        expect(not allowed and "install" in reason,
+               f"scope escalation must be denied: {reason}")
+        allowed, _ = access.authorize("api.chat", scope="assist")
+        expect(allowed, "matching-scope assist must be allowed")
+
+        # 5. the actor lands in the ledger (api entries say who asked)
+        access.revoke_all()
+        access.grant_tiers(["assist"], access.CONFIRMATION_PHRASE)
+        access.authorize("api.chat", actor="api")
+        entries = access.log_entries()
+        api_entries = [e for e in entries if e.get("actor") == "api"]
+        expect(any(e.get("action") == "reach_allowed" for e in api_entries),
+               "the actor must be recorded in ledger entries")
+        expect(all(e.get("integrity") == "ok" for e in entries), "ledger integrity")
+    finally:
+        config.config_dir = original
+
+
 def ga_hardening(tmp: Path) -> None:
     """Mark XXXI - GA hardening: license limits, update apply, payhub."""
     import base64
@@ -3244,6 +3303,7 @@ def main() -> int:
     check("GA hardening", lambda: ga_hardening(tmp_path))
     check("brain v0: providers + gateway + doctor", lambda: brain_v0_providers_gateway(tmp_path))
     check("brain v1: privacy router", lambda: brain_router_v1(tmp_path))
+    check("spine bypass attempts", lambda: spine_bypass_attempts(tmp_path))
 
     check("BrainChain failover", chain_failover)
     check("BrainChain non-transient raises", chain_non_transient_raises)

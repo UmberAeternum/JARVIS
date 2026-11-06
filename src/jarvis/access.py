@@ -174,21 +174,31 @@ def revoke_all() -> str:
     return "FULL ACCESS revoked - reach capabilities are denied again."
 
 
-def authorize(action: str, target: str = "") -> tuple[bool, str]:
-    """THE policy chokepoint (Phase 1). Every reach capability calls this -
-    no gate may check grants, expiry, or fingerprint on its own.
+def authorize(action: str, target: str = "", scope: str | None = None,
+              actor: str = "user") -> tuple[bool, str]:
+    """THE policy chokepoint (Phase 1, actor/scope added in the
+    follow-through). Every reach capability calls this - no gate may check
+    grants, expiry, or fingerprint on its own.
 
-    Checks the action's required tier against the tiered grants (expiry +
-    fingerprint), then writes the ledger entry either way. Returns
-    (allowed, reason)."""
-    tier = SCOPE_TIER.get(action, "install")  # unknown actions: strongest gate
+    - scope: an explicit tier request; when omitted, the action's mapped
+      tier applies. An escalated scope (higher than the action's mapping)
+      is honored ONLY if that tier is genuinely granted - escalation is
+      therefore still consent-bound.
+    - actor: who asked (user | api | overlay | agent) - recorded in the
+      ledger so every entry says who reached.
+
+    Checks the tier against the tiered grants (expiry + fingerprint), then
+    writes the ledger entry either way. Returns (allowed, reason)."""
+    mapped = SCOPE_TIER.get(action, "install")
+    tier = scope if scope in TIER_RANK else mapped
     state = _load_state()
     now = time.time()
+    detail = action + (f" -> {target}" if target else "") + f" (actor: {actor})"
     if _tier_active(tier, state, now):
-        log_append("reach_allowed", action + (f" -> {target}" if target else ""))
+        log_append("reach_allowed", detail, actor=actor)
         return True, f"{action} authorized (tier {tier})."
     reason = f"{action} denied - tier '{tier}' not granted (or expired)."
-    log_append("reach_denied", reason + (f" -> {target}" if target else ""))
+    log_append("reach_denied", reason + (f" -> {target}" if target else ""), actor=actor)
     return False, reason
 
 
@@ -229,8 +239,9 @@ def _entry_hash(prev_hash: str, entry: dict) -> str:
     return hashlib.sha256((prev_hash + canonical).encode("utf-8")).hexdigest()
 
 
-def log_append(action: str, detail: str) -> None:
-    """Append one tamper-evident entry (chained hashes). Never raises."""
+def log_append(action: str, detail: str, actor: str = "user") -> None:
+    """Append one tamper-evident entry (chained hashes). Never raises.
+    The actor (user | api | overlay | agent) is part of the signed entry."""
     try:
         path = _log_path()
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -246,6 +257,7 @@ def log_append(action: str, detail: str) -> None:
             "ts": time.strftime("%Y-%m-%dT%H:%M:%S"),
             "action": action,
             "detail": detail,
+            "actor": actor,
         }
         entry["hash"] = _entry_hash(prev_hash, entry)
         with path.open("a", encoding="utf-8") as fh:

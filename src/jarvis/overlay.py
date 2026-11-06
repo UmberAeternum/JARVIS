@@ -79,7 +79,7 @@ def run_overlay(
     if attach_name:
         from . import access
 
-        allowed, reason = access.authorize("overlay.attach", target=attach_name)
+        allowed, reason = access.authorize("overlay.attach", target=attach_name, actor="overlay")
         if not allowed:
             console.print(f"[red]{reason}[/]\nGrant it: [bold]jarvis access grant --full[/]")
             return 1

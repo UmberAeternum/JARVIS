@@ -36,6 +36,16 @@ def _pyautogui():
 
 
 def register_screen_tools(registry) -> None:
+    def _ledger(action: str) -> None:
+        # Mark XXXI follow-through: every PRO tool execution lands in the
+        # EDITH ledger (visibility only - the license check remains the gate).
+        try:
+            from .access import log_append
+
+            log_append("pro_tool", action)
+        except Exception:
+            pass  # the ledger must never break the tool
+
     def screen_click(x: int, y: int, button: str = "left") -> str:
         xi, yi = _check_coord(x, y)
         if button not in ("left", "right", "middle"):
@@ -43,6 +53,7 @@ def register_screen_tools(registry) -> None:
         if not registry.confirm(f"Move the mouse and {button}-click at ({xi}, {yi})?"):
             return "BLOCKED: the user declined this click."
         _pyautogui().click(x=xi, y=yi, button=button)
+        _ledger(f"screen_click {button} at ({xi}, {yi})")
         return f"Clicked {button} at ({xi}, {yi}). Use /look to verify the result."
 
     def screen_type(text: str, paste: bool = False) -> str:
@@ -61,10 +72,12 @@ def register_screen_tools(registry) -> None:
 
                 pyperclip.copy(text)
                 automation.hotkey("ctrl", "v")
+                _ledger(f"screen_type pasted {len(text)} chars")
                 return f"Pasted {len(text)} characters via clipboard."
             except Exception as exc:
                 return f"ERROR: clipboard paste failed: {exc}"
         automation.typewrite(text, interval=0.01)  # ASCII only
+        _ledger(f"screen_type {len(text)} chars")
         return (
             f"Typed {len(text)} characters. Note: typing is ASCII-only; "
             "pass paste=true for non-ASCII text."
@@ -77,6 +90,7 @@ def register_screen_tools(registry) -> None:
         if not registry.confirm(f"Press key '{key}'?"):
             return "BLOCKED: the user declined this key press."
         _pyautogui().press(key)
+        _ledger(f"screen_press {key}")
         return f"Pressed {key}."
 
     def screen_scroll(amount: int) -> str:
@@ -89,6 +103,7 @@ def register_screen_tools(registry) -> None:
         if not registry.confirm(f"Scroll {clicks} click(s) (positive = up)?"):
             return "BLOCKED: the user declined scrolling."
         _pyautogui().scroll(clicks)
+        _ledger(f"screen_scroll {clicks}")
         return f"Scrolled {clicks} click(s)."
 
     registry.register(

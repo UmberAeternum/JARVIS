@@ -1,45 +1,24 @@
-UMBRA Brain v0+v1: provider abstraction, gateway, doctor, privacy router
+Phase 1 follow-through: actor/scope in the spine, PRO tool ledger, tags
 
-The Brain router era - one gateway, many models, privacy-first routing.
+The pasted Phase 0+1 prompt is fully satisfied; this commit closes the
+last deltas found by reconciling it against what shipped:
 
-v0 - provider abstraction + gateway + doctor:
-- brain/ package: the legacy brain.py content is preserved verbatim as
-  brain/__init__.py (every existing import keeps working) and the new
-  layers live in submodules. providers/base.py defines the Provider
-  interface (chat, stream, tools, vision, embed, health);
-  providers/ollama.py adapts Ollama's native /api surface with an
-  injectable transport (tests mock HTTP, no network);
-  providers/openai_compat.py composes the proven legacy Brain.
-- manifest.py: per-model capability manifests (id, locality, tools,
-  vision, context, costs, latency, strengths, privacy_class) with schema
-  validation; built-ins for the default local brain; user manifests
-  override built-ins by id from <config>/manifests/*.json.
-- complete(request): the single gateway - behavior-preserving, drives the
-  same BrainChain machinery and records the route (model, failover) as
-  metadata. classify_error() adds timeout/auth/rate-limit/server/
-  connection classes for fallback decisions.
-- jarvis doctor: Python, config, license, local-brain reachability +
-  model presence, update-check reachability, EDITH ledger integrity -
-  each with a fix hint. Always exit 0 (a report, not a gate).
-
-v1 - the privacy router:
-- router.py pipeline: sensitivity check (paths, emails, key shapes,
-  screen-content markers) -> task classification (keyword rules) ->
-  candidate filter (capabilities + context) -> budget filter (per-request
-  and daily caps) -> selection (strength match, then cheapest,
-  local-first on ties) -> privacy-preserving fallback order.
-- Cloud providers are opt-in per provider (config router.cloud_providers);
-  sensitive text NEVER routes to a cloud model (tested); the redaction
-  gate scrubs paths/emails/keys/license shapes before any cloud call.
-- Route log (route-log.jsonl): model id, intent, sensitivity, cost and
-  latency estimates - never the prompt text. jarvis brain status and
-  jarvis brain route --explain "<prompt>" (dry run, no network).
-- config: additive RouterConfig section (cloud_providers,
-  max_cost_per_request, daily_budget); settings show/set cover the
-  budgets.
-- Tests: provider contract against the mock and the Ollama adapter with
-  mocked HTTP; manifest validation; gateway failover; doctor report;
-  classification; sensitivity pinning; vision-capability filtering;
-  budget enforcement; redaction; route-log privacy.
-- Version 3.21.0 (v0 and v1 ship together; versions bump per mark, not
-  per sub-phase).
+- authorize(action, target, scope, actor): the chokepoint now takes an
+  explicit scope (tier request - escalation is honored only if that tier
+  is genuinely granted, so it stays consent-bound) and an actor (user |
+  api | overlay | agent) recorded inside the signed ledger entry - every
+  line in the access log now says who asked.
+- PRO tool calls are logged: every screen_click/type/press/scroll that
+  passes its confirmation writes a pro_tool entry to the EDITH ledger
+  (visibility only - the license check remains the gate; noted decision:
+  PRO tools are NOT blocked by the access grant, preserving the shipped
+  license-alone-unlocks behavior).
+- Bypass-attempt tests: forged state file with a foreign fingerprint
+  denied; env vars cannot grant or bypass authorize; scope escalation
+  denied; matching-scope assist allowed; the actor recorded in ledger
+  entries with chain integrity verified.
+- SUPPORT.md: the EDITH access protocol documented (grant tiers,
+  expiry, ledger, revoke, verify).
+- Phase 0 item: the pre-spine commit is tagged pre-spine (d540991,
+  the v3.19.0 release - the last commit before the spine existed).
+- Version 3.22.0.
