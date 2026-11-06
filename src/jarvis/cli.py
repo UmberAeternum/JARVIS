@@ -379,8 +379,8 @@ def _wake_session(cfg: config.Config, console: Console) -> None:
         on_status=lambda status: console.print(f"  [dim]>> {status}[/]"),
     )
     console.print(
-        "[cyan]Hands-free mode.[/] Say [bold]'Jarvis'[/], then your command "
-        "after the cue. Ctrl+C to stop."
+        "[cyan]Hands-free mode.[/] Say [bold]'" + cfg.voice.wake_phrase + "'[/], "
+        "then your command after the cue. Ctrl+C to stop."
     )
     console.print(
         "[dim]Privacy: wake-word detection and transcription run locally (Vosk); "
@@ -388,7 +388,7 @@ def _wake_session(cfg: config.Config, console: Console) -> None:
     )
     while True:
         try:
-            command = voice.listen_wake()
+            command = voice.listen_wake(phrase=cfg.voice.wake_phrase)
         except KeyboardInterrupt:
             console.print("\n[dim]Standing down, Sir.[/]")
             return
@@ -500,6 +500,7 @@ def _dispatch(argv: list[str] | None = None) -> int:
             "  overlay     always-on-top companion beside your other apps\n"
             "  plugin      scaffold <vscode|browser> --out <dir> - app-injection starters\n"
             "  inject      scan | install | bundle - put UMBRA on another device\n"
+            "  personality show | set - honorific, verbosity, humor, proactivity\n"
             "  api         token rotate | token show - the local API credential\n"
             "  dashboard   the Mission Control: local web dashboard\n"
             "  setup       run the onboarding wizard (setup --yes for CI)\n"
@@ -650,6 +651,51 @@ def _dispatch(argv: list[str] | None = None) -> int:
             "host's own settings at runtime; see the generated README.[/]"
         )
         return 0
+    if argv and argv[0] == "personality":
+        from .personality import load, save
+
+        sub = argv[1] if len(argv) > 1 else "show"
+        if sub == "show":
+            values = load()
+            console.print(
+                f"honorific: {values['honorific']} · verbosity: {values['verbosity']} · "
+                f"humor: {values['humor']}/10 · proactive: {values['proactive']}/2"
+            )
+            console.print("[dim]set with: jarvis personality set --honorific X --verbosity concise|normal|chatty --humor 0-10 --proactive 0-2[/]")
+            return 0
+        if sub == "set":
+            rest = argv[2:]
+            updates: dict = {}
+            for flag, key in (("--honorific", "honorific"), ("--verbosity", "verbosity")):
+                if flag in rest:
+                    index = rest.index(flag)
+                    if index + 1 < len(rest):
+                        updates[key] = rest[index + 1]
+            for flag, key in (("--humor", "humor"), ("--proactive", "proactive")):
+                if flag in rest:
+                    index = rest.index(flag)
+                    if index + 1 < len(rest):
+                        try:
+                            updates[key] = int(rest[index + 1])
+                        except ValueError:
+                            console.print(f"[red]{flag} needs an integer[/]")
+                            return 1
+            if not updates:
+                console.print("usage: jarvis personality set [--honorific X] [--verbosity V] [--humor 0-10] [--proactive 0-2]")
+                return 1
+            try:
+                values = save(updates)
+            except ValueError as exc:
+                console.print(f"[red]{exc}[/]")
+                return 1
+            console.print(
+                f"[green]Personality saved.[/] honorific: {values['honorific']} · "
+                f"verbosity: {values['verbosity']} · humor: {values['humor']}/10 · "
+                f"proactive: {values['proactive']}/2"
+            )
+            return 0
+        console.print("usage: jarvis personality show | set [...]")
+        return 1
     if argv and argv[0] == "inject":
         from .inject import run_inject
 

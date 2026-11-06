@@ -1,28 +1,29 @@
-Mark XXVII: device injection (scan + install + bundle)
+Mark XXVIII: living presence (wake phrase + ambient + personality)
 
-One command installs UMBRA on another device.
-
-- inject.py: jarvis inject scan sweeps the local /24 on telling ports
-  (22 ssh, 445 smb, 5555 adb, 8775 UMBRA API) with a threaded TCP sweep
-  (stdlib; ICMP needs raw sockets) and prints host + OS guess +
-  install feasibility. jarvis inject install builds the exact plan for
-  windows (scp + ssh silent installer), linux (scp + bash installer,
-  optional systemd --user unit) or android (adb install -r), prints it
-  with --dry-run (ZERO network calls), and executes only with --yes.
-  jarvis inject bundle writes an offline installer zip: wheel (built on
-  demand), UMBRA.exe when present, generated install-umbra.ps1/.sh,
-  README, and the PUBLIC key text - never any private material
-  (no_secrets_guard refuses .pem/.key/private members).
-- Safety model: plans are pure data; runner.py is the single execution
-  point (argument-list subprocesses, shell=False, no shell parser ever
-  sees target or plan text). Targets are regex-validated to a strict
-  [user@]host charset before any argv exists; remote ssh commands are
-  module constants. Passwords are never asked for or stored (SSH
-  keys/agent only); root/admin targets refused without --i-know;
-  WinRM not implemented - the plan prints the manual command instead
-  (noted assumption). Thin wrappers: scripts/inject.sh + inject.ps1.
-- Tests: sweep finds a live loopback listener; plans for all three OSes;
-  unsafe-target and root guards; bundle contents (installers + public
-  key + README, no key material, guard refuses a planted .pem); dry-run
-  prints the plan; --yes required to execute.
-- Version 3.14.0.
+- Wake phrase: configurable (voice.wake_phrase, default "Hey UMBRA"),
+  honored by jarvis wake end to end - status line, partial matching, and
+  prefix stripping; the JARVIS aliases remain accepted as the
+  in-experience alias. Push-to-talk fallback unchanged.
+- Ambient nudges (ambient.py, pure + testable): low battery, due
+  reminders, health-band shifts - one concise nudge per evaluation,
+  per-signal rate limiting (default 5 min), quiet hours (windows may
+  cross midnight), wired into the sentinel daemon. Strictly opt-in:
+  config ambient.nudges defaults to False; per-signal toggles
+  (battery/reminders/health). Nudges never fire during an active
+  announcement and never repeat inside the window.
+- Personality pack (personality.json - JSON over YAML is a deliberate
+  stdlib choice, noted assumption): honorific, verbosity, humor,
+  proactive. jarvis personality show/set with strict validation
+  (verbosity enum, humor 0-10, proactive 0-2, honorific 1-24 chars);
+  corrupt packs fall back to the default register. The honorific is
+  applied to the sentinel's visible greetings; system-prompt plumbing
+  is deferred (noted assumption - XXVIII acceptance is validation +
+  defaults).
+- Config: additive AmbientConfig section (schema stays v4) + wake_phrase
+  on VoiceConfig; settings show/set cover all ambient keys.
+- Tests: wake phrase + legacy alias; quiet-hours boundaries (midnight
+  crossing, same-day window, bad bounds); rate limit; candidates from
+  battery/reminders/health with per-signal gating; pick quiet/fired
+  behavior; personality defaults/validation/persistence; ambient
+  default OFF + config round-trip (incl. wake_phrase).
+- Version 3.15.0.

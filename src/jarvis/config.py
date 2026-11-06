@@ -148,6 +148,7 @@ class VoiceConfig:
     stt_model: str = "base"      # faster-whisper model size (tiny/base/small/...)
     tts_enabled: bool = True     # speak replies aloud?
     mic_device: int | None = None  # sounddevice input device index (None = default)
+    wake_phrase: str = "Hey UMBRA"  # Mark XXVIII: hands-free wake phrase
 
 
 @dataclass
@@ -177,6 +178,20 @@ class DiagnosticsConfig:
 
 
 @dataclass
+class AmbientConfig:
+    """Mark XXVIII: proactive nudges. Strictly opt-in, rate-limited, quiet
+    hours respected; per-signal toggles (battery/reminders/health)."""
+
+    nudges: bool = False         # master switch - default OFF
+    battery: bool = True         # low-battery nudge
+    reminders: bool = True       # due-reminders nudge
+    health: bool = False         # health-band-shift nudge
+    quiet_start: str = "23:00"   # quiet hours (may cross midnight)
+    quiet_end: str = "07:00"
+    rate_limit_min: int = 5      # at most one nudge per window
+
+
+@dataclass
 class Config:
     version: int = 4
     brains: BrainsConfig = field(default_factory=BrainsConfig)
@@ -187,6 +202,7 @@ class Config:
     vision: VisionConfig = field(default_factory=VisionConfig)
     updates: UpdatesConfig = field(default_factory=UpdatesConfig)
     diagnostics: DiagnosticsConfig = field(default_factory=DiagnosticsConfig)
+    ambient: AmbientConfig = field(default_factory=AmbientConfig)
     created_at: str = ""
     updated_at: str = ""
 
@@ -224,6 +240,7 @@ class Config:
                 "stt_model": self.voice.stt_model,
                 "tts_enabled": self.voice.tts_enabled,
                 "mic_device": self.voice.mic_device,
+                "wake_phrase": self.voice.wake_phrase,
             },
             "vision": {
                 "enabled": self.vision.enabled,
@@ -240,6 +257,15 @@ class Config:
             },
             "diagnostics": {
                 "crash_reports": self.diagnostics.crash_reports,
+            },
+            "ambient": {
+                "nudges": self.ambient.nudges,
+                "battery": self.ambient.battery,
+                "reminders": self.ambient.reminders,
+                "health": self.ambient.health,
+                "quiet_start": self.ambient.quiet_start,
+                "quiet_end": self.ambient.quiet_end,
+                "rate_limit_min": self.ambient.rate_limit_min,
             },
             "created_at": self.created_at,
             "updated_at": self.updated_at,
@@ -317,6 +343,11 @@ class Config:
         return DiagnosticsConfig(**{k: v for k, v in (raw or {}).items() if k in known})
 
     @classmethod
+    def _ambient_from(cls, raw: dict | None) -> AmbientConfig:
+        known = {f.name for f in fields(AmbientConfig)}
+        return AmbientConfig(**{k: v for k, v in (raw or {}).items() if k in known})
+
+    @classmethod
     def _from_modern(cls, raw: dict) -> "Config":
         """v2/v3/v4 share every key except voice and vision (defaults fill in)."""
         use_keyring = bool(raw.get("use_keyring", False))
@@ -330,6 +361,7 @@ class Config:
             vision=cls._vision_from(raw.get("vision")),
             updates=cls._updates_from(raw.get("updates")),
             diagnostics=cls._diagnostics_from(raw.get("diagnostics")),
+            ambient=cls._ambient_from(raw.get("ambient")),
             created_at=raw.get("created_at", ""),
             updated_at=raw.get("updated_at", ""),
         )

@@ -36,6 +36,13 @@ SETTABLE: tuple[str, ...] = (
     "updates.check_on_start",
     "updates.manifest_url",
     "diagnostics.crash_reports",
+    "ambient.nudges",
+    "ambient.battery",
+    "ambient.reminders",
+    "ambient.health",
+    "ambient.quiet_start",
+    "ambient.quiet_end",
+    "ambient.rate_limit_min",
     "max_tool_iterations",
     "max_tokens_per_turn",
     "use_keyring",
@@ -119,6 +126,12 @@ def show_text(cfg: config.Config) -> str:
         + (f" manifest_url={cfg.updates.manifest_url}" if cfg.updates.manifest_url else "")
     )
     lines.append(f"diagnostics: crash_reports={cfg.diagnostics.crash_reports}")
+    lines.append(
+        f"ambient: nudges={cfg.ambient.nudges} battery={cfg.ambient.battery} "
+        f"reminders={cfg.ambient.reminders} health={cfg.ambient.health} "
+        f"quiet={cfg.ambient.quiet_start}-{cfg.ambient.quiet_end} "
+        f"rate_limit_min={cfg.ambient.rate_limit_min}"
+    )
     lines.append(f"config file: {config.config_path()}")
     return "\n".join(lines)
 

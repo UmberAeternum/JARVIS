@@ -48,9 +48,18 @@ MAX_MODEL_BYTES = 300_000_000
 WAKE_VARIANTS = ("jarvis", "jervis", "javis", "jarvic", "jarvez")
 
 
-def wake_hit(partial_text: str) -> bool:
-    """True when a wake-word variant appears in a transcription partial."""
+def wake_hit(partial_text: str, phrase: str = "") -> bool:
+    """True when the wake phrase (or a JARVIS alias) appears in a partial.
+
+    With a configured phrase (Mark XXVIII), the phrase's key word (its last
+    word, e.g. 'umbra' from 'Hey UMBRA') triggers; the JARVIS aliases stay
+    accepted as the in-experience alias.
+    """
     lowered = (partial_text or "").lower()
+    if phrase:
+        words = phrase.lower().split()
+        if words and words[-1] in lowered:
+            return True
     return any(variant in lowered for variant in WAKE_VARIANTS)
 
 
@@ -285,12 +294,13 @@ class VoiceIO:
         end = min(audio.shape[0], (int(loud[-1]) + 1) * frame + SAMPLE_RATE // 5)
         return audio[start:end]
 
-    def listen_wake(self, max_command_s: float = 8.0) -> str | None:
-        """Hands-free: block until the wake word is heard, then capture the
+    def listen_wake(self, max_command_s: float = 8.0, phrase: str = "") -> str | None:
+        """Hands-free: block until the wake phrase is heard, then capture the
         command until trailing silence or the time cap. Returns the command
         text with the wake word stripped, or None (reason in last_error).
 
         Requires the Vosk backend: it is the only streaming recognizer here.
+        The phrase is configurable (Mark XXVIII); empty = the JARVIS aliases.
         """
         ok, reason = stt_available()
         if not ok:
@@ -318,7 +328,7 @@ class VoiceIO:
             self._vosk = Model(str(_vosk_model_path()))
 
         recognizer = KaldiRecognizer(self._vosk, SAMPLE_RATE)
-        self.on_status("listening for the wake word ('Jarvis')")
+        self.on_status(f"listening for the wake word ('{phrase or 'Jarvis'}')")
         triggered_at: float | None = None
         last_speech = 0.0
         chunks_after: list = []
@@ -338,7 +348,7 @@ class VoiceIO:
                     if triggered_at is None:
                         recognizer.AcceptWaveform(pcm.tobytes())
                         partial = json.loads(recognizer.PartialResult()).get("partial", "")
-                        if wake_hit(partial):
+                        if wake_hit(partial, phrase):
                             triggered_at = time.time()
                             last_speech = triggered_at
                             chunks_after = [pcm]
@@ -356,7 +366,9 @@ class VoiceIO:
                             result = json.loads(recognizer.FinalResult())
                             text = str(result.get("text", "")).strip()
                             lowered = text.lower()
-                            for variant in WAKE_VARIANTS:
+                            keys = (*WAKE_VARIANTS,
+                                    *(phrase.lower().split()[-1:] if phrase.split() else ()))
+                            for variant in keys:
                                 if lowered.startswith(variant):
                                     text = text[len(variant):].strip(" ,.!?")
                                     break

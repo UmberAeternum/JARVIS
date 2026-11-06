@@ -147,12 +147,15 @@ def due_now(reminder: dict, now: datetime, fired_on: dict[int, str]) -> bool:
 
 def compose_briefing() -> str:
     """Morning briefing from local data: health, kanban, memory. Honest
-    about missing pieces; needs no API key and no brain."""
+    about missing pieces; needs no API key and no brain. The honorific
+    comes from the personality pack (Mark XXVIII)."""
     from . import health
     from .memory import recent_notes
+    from .personality import load as load_personality
     from .portal import load_board
 
-    lines = ["Good morning, Sir. The briefing:"]
+    honorific = load_personality().get("honorific", "Sir")
+    lines = [f"Good morning, {honorific}. The briefing:"]
 
     report = health.risk_assessment()
     lines.append("Health: " + report.splitlines()[0])
@@ -252,6 +255,7 @@ def run_sentinel(console, interval_s: int = 20, briefing_time: str = "08:00") ->
     watch_last_fired: dict[object, float] = {}
     watch_last_band: dict[str, str | None] = {"band": None}
     folder_snaps: dict[str, tuple[int, float]] = {}
+    ambient_fired: dict[str, float] = {}  # Mark XXVIII: per-signal nudge times
     tts = None
     try:
         import pyttsx3
@@ -342,6 +346,29 @@ def run_sentinel(console, interval_s: int = 20, briefing_time: str = "08:00") ->
                     if watchtower.cooldown_passed(rule, watch_last_fired, time.time()):
                         watch_last_fired[rule["id"]] = time.time()
                         announce(finding)
+
+            # Mark XXVIII - ambient nudges: opt-in, rate-limited, quiet hours
+            ambient_cfg = (config.Config.load() or config.Config()).ambient
+            if ambient_cfg.nudges:
+                from . import ambient
+                from .personality import load as load_personality
+
+                honorific = load_personality().get("honorific", "Sir")
+                quiet = ambient.in_quiet_hours(now, ambient_cfg.quiet_start, ambient_cfg.quiet_end)
+                candidates = ambient.candidates(
+                    watchtower.read_vitals(), 0, health.risk_assessment(),
+                    honorific=honorific,
+                    battery=ambient_cfg.battery, health=ambient_cfg.health,
+                    reminders=ambient_cfg.reminders,
+                )
+                picked = ambient.pick(
+                    candidates, ambient_fired, time.time(),
+                    ambient_cfg.rate_limit_min, quiet,
+                )
+                if picked is not None:
+                    signal_key, nudge = picked
+                    ambient_fired[signal_key] = time.time()
+                    announce(nudge)
             time.sleep(interval_s)
     except KeyboardInterrupt:
         console.print("[dim]Sentinel standing down, Sir.[/]")

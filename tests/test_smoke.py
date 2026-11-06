@@ -106,7 +106,7 @@ class FakeBrain:
 
 
 def version_string() -> None:
-    expect(__version__ == "3.14.0", __version__)
+    expect(__version__ == "3.15.0", __version__)
 
 
 def registry_built() -> None:
@@ -2398,6 +2398,98 @@ def inject_scan_plan_bundle(tmp: Path) -> None:
     expect(code2 == 1 and "--yes" in out2.getvalue(), out2.getvalue())
 
 
+def presence_wake_ambient_personality(tmp: Path) -> None:
+    """Mark XXVIII - wake phrase, ambient nudges, personality pack."""
+    from datetime import datetime, timedelta
+
+    from jarvis import ambient, personality
+    from jarvis.voice import wake_hit
+
+    # wake phrase: configurable key word, JARVIS aliases still work
+    expect(wake_hit("hey umbra what time", phrase="Hey UMBRA"), "umbra phrase missed")
+    expect(wake_hit("umbra status", phrase="Hey UMBRA"), "bare key word missed")
+    expect(wake_hit("jarvis status"), "legacy alias must still trigger")
+    expect(not wake_hit("the weather", phrase="Hey UMBRA"), "false positive")
+
+    # ambient: quiet hours, crossing midnight
+    late = datetime(2026, 11, 6, 23, 30)
+    early = datetime(2026, 11, 7, 6, 59)
+    day = datetime(2026, 11, 6, 12, 0)
+    expect(ambient.in_quiet_hours(late, "23:00", "07:00"), "23:30 must be quiet")
+    expect(ambient.in_quiet_hours(early, "23:00", "07:00"), "06:59 must be quiet")
+    expect(not ambient.in_quiet_hours(day, "23:00", "07:00"), "noon must not be quiet")
+    expect(not ambient.in_quiet_hours(
+        datetime(2026, 11, 6, 22, 59), "23:00", "07:00"), "22:59 not yet quiet")
+    expect(not ambient.in_quiet_hours(day, "bogus", "07:00"), "bad bounds = never quiet")
+    expect(ambient.in_quiet_hours(day, "11:00", "13:00"), "same-day window works")
+
+    # ambient: rate limit
+    now = 10_000.0
+    expect(ambient.nudge_ready(0.0, now, 5), "first nudge always ready")
+    expect(not ambient.nudge_ready(now - 60, now, 5), "inside window must block")
+    expect(ambient.nudge_ready(now - 301, now, 5), "window elapsed = ready")
+
+    # ambient: candidates from signals
+    vitals = {"battery": 22, "cpu": 30}
+    pairs = ambient.candidates(vitals, 2, "HEALTH SIGNAL: ELEVATED ...", honorific="Sir")
+    keys = {key for key, _ in pairs}
+    expect(keys == {"battery", "reminders", "health"}, f"candidate keys: {keys}")
+    battery_nudge = dict(pairs)["battery"]
+    expect("22%" in battery_nudge and battery_nudge.startswith("Sir"), battery_nudge)
+    healthy = ambient.candidates({"battery": 80}, 0, "HEALTH SIGNAL: BASELINE ...")
+    expect(healthy == [], "healthy signals must be silent")
+    gated = ambient.candidates({"battery": 10}, 1, "HEALTH SIGNAL: HIGH",
+                               battery=False, health=False, reminders=False)
+    expect(gated == [], "per-signal toggles must gate candidates")
+
+    # ambient: pick respects quiet + rate + per-signal firing
+    fired: dict[str, float] = {}
+    picked = ambient.pick(pairs, fired, now, 5, quiet=False)
+    expect(picked is not None and picked[0] == "battery", "first candidate picked")
+    expect(ambient.pick(pairs, fired, now, 5, quiet=True) is None, "quiet must suppress")
+    fired["battery"] = now
+    second = ambient.pick(pairs, fired, now, 5, quiet=False)
+    expect(second is not None and second[0] != "battery", "fired signal must be skipped")
+    fired.update({key: now for key, _ in pairs})
+    expect(ambient.pick(pairs, fired, now, 5, quiet=False) is None, "all fired = none")
+
+    # personality: defaults, validation, round-trip
+    original = config.config_dir
+    config.config_dir = lambda: tmp / "cfgpers"
+    try:
+        values = personality.load()
+        expect(values["honorific"] == "Sir" and values["humor"] == 5, "defaults wrong")
+        saved = personality.save({"honorific": "Captain", "verbosity": "chatty"})
+        expect(saved["honorific"] == "Captain" and saved["verbosity"] == "chatty", "save failed")
+        reloaded = personality.load()
+        expect(reloaded["honorific"] == "Captain", "personality not persisted")
+        for bad in ({"verbosity": "shouting"}, {"humor": 11}, {"proactive": 5},
+                    {"honorific": ""}, {"humor": "lots"}):
+            try:
+                personality.save(bad)
+            except ValueError:
+                pass
+            else:
+                raise AssertionError(f"invalid personality accepted: {bad}")
+    finally:
+        config.config_dir = original
+
+    # config: default OFF, additive section round-trips
+    fresh = config.Config()
+    expect(fresh.ambient.nudges is False, "ambient nudges must default OFF")
+    fresh.ambient.nudges = True
+    original = config.config_dir
+    config.config_dir = lambda: tmp / "cfgamb"
+    try:
+        fresh.save()
+        reloaded = config.Config.load()
+        expect(reloaded is not None and reloaded.ambient.nudges is True
+               and reloaded.voice.wake_phrase == "Hey UMBRA",
+               "ambient/wake config not persisted")
+    finally:
+        config.config_dir = original
+
+
 def main() -> int:
     check("version string", version_string)
     check("registry builds with 22 tools", registry_built)
@@ -2469,6 +2561,7 @@ def main() -> int:
     check("overlay no-ui paths", lambda: overlay_no_ui(tmp_path))
     check("plugin scaffolds", lambda: plugin_scaffolds(tmp_path))
     check("inject scan + plans + bundle", lambda: inject_scan_plan_bundle(tmp_path))
+    check("presence: wake + ambient + personality", lambda: presence_wake_ambient_personality(tmp_path))
 
     check("BrainChain failover", chain_failover)
     check("BrainChain non-transient raises", chain_non_transient_raises)
