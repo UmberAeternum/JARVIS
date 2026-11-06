@@ -1,9 +1,9 @@
 {
   "payload": {
-    "version": "3.12.0",
+    "version": "3.17.0",
     "channel": "stable",
-    "notes": "The Portal speaks: the WebXR room now runs the full 24-tool agent - streamed replies on the chat panel and APPROVE/DENY confirmations in the room. Every surface - desk CLI, browser dashboard, phone HUD, bridge panel, avatar and headset - shares one brain, one gate, one stream.",
-    "url": "https://github.com/UmberAeternum/JARVIS/releases/tag/v3.12.0"
+    "notes": "The injection era, complete: UMBRA lives inside your other apps (local API, overlay, VS Code and browser scaffolds), installs onto other devices with one command, and is present everywhere \u2014 wake phrase, ambient nudges, personality pack, British-butler voice, the HUD boot sequence. All of it local-first, all of it gated.",
+    "url": "https://github.com/UmberAeternum/JARVIS/releases/tag/v3.17.0"
   },
-  "signature": "EuXQD6L/ldKjYWst5CoP2i4jSn+zEyLBrH8Rzd3qW3X8kLilC9l99U/RDo6efKeqcx9giZTnaJ3e6LgPVnMNBw=="
+  "signature": "NebuKjik0I1SO/I8sp8oY6xVW2tGLtOdh+rMUdrdSUDmz4GqK3mOkzmpjAIJe5i/7EBPTLa42V1dn10jXVmzBw=="
 }
