@@ -85,6 +85,20 @@ UMBRA can live inside your other tools, not just its own console:
 
 Gated tools (the kind that need a human yes/no) are auto-denied over the API — use the dashboard or the Bridge for interactive approvals.
 
+## Device injection
+
+One command puts UMBRA on another machine — no manual steps on the target:
+
+```bash
+jarvis inject scan                                   # sweep the LAN, guess OS + feasibility
+jarvis inject install --target 192.168.1.50 --os linux --dry-run
+jarvis inject install --target 192.168.1.50 --os linux --yes
+jarvis inject install --target <adb-device> --os android --apk UMBRA-launcher-*.apk
+jarvis inject bundle --out umbra-inject-bundle.zip   # offline installer: wheel + scripts + public key
+```
+
+Windows and Linux targets install over SSH (keys/agent only — passwords are never asked for or stored); Android via `adb`. Root/admin targets are refused without `--i-know`, the bundle never contains private material, and `--dry-run` prints the exact plan with zero network calls. Thin wrappers: `scripts/inject.sh`, `scripts/inject.ps1`.
+
 ## The bodies
 
 | Surface | Command |

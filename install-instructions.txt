@@ -80,6 +80,9 @@ EVERYDAY COMMANDS
                          makes it display-only)
   jarvis plugin scaffold vscode|browser --out DIR
                          generate starter extensions that call the local API
+  jarvis inject scan | install | bundle
+                         put UMBRA on another device (SSH keys/agent only,
+                         --dry-run prints the plan, root/admin needs --i-know)
   jarvis license activate UMBRA-xxxx.yyyy
   jarvis license status
 

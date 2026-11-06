@@ -106,7 +106,7 @@ class FakeBrain:
 
 
 def version_string() -> None:
-    expect(__version__ == "3.13.0", __version__)
+    expect(__version__ == "3.14.0", __version__)
 
 
 def registry_built() -> None:
@@ -2316,6 +2316,88 @@ def plugin_scaffolds(tmp: Path) -> None:
             expect("BEGIN" not in text, f"key header in {path.name}")
 
 
+def inject_scan_plan_bundle(tmp: Path) -> None:
+    """Mark XXVII - device injection: scan, plans, guards, bundle."""
+    import io
+    import socket
+    import zipfile as zfmod
+
+    from rich.console import Console
+
+    from jarvis import inject as inj
+
+    # scan: the sweep finds a live loopback listener
+    listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    listener.bind(("127.0.0.1", 0))
+    listener.listen(1)
+    port = listener.getsockname()[1]
+    try:
+        found = inj.sweep_hosts(["127.0.0.1"], [port], timeout=1.0)
+        expect(found.get("127.0.0.1") == [port], f"sweep missed the listener: {found}")
+    finally:
+        listener.close()
+
+    # plans: all three OSes, built as data with zero network calls
+    steps_linux = inj.build_plan("linux", "umbra@192.168.1.50")
+    expect(any("ssh" in argv for _, argv in steps_linux), "linux plan needs an ssh step")
+    steps_win = inj.build_plan("windows", "192.168.1.60")
+    expect(any("scp" in argv for _, argv in steps_win), "windows plan needs an scp step")
+    apk = tmp / "UMBRA-launcher-v1.4-debug.apk"
+    apk.write_text("apk-bytes", encoding="utf-8")
+    steps_android = inj.build_plan("android", "127.0.0.1", apk=apk)
+    expect(any("adb" in argv for _, argv in steps_android), "android plan needs adb")
+
+    # guards: unsafe target charset, root account
+    try:
+        inj.validated_target("host; rm -rf /")
+    except SystemExit:
+        pass
+    else:
+        raise AssertionError("unsafe target must be refused")
+    try:
+        inj._root_guard("root@host", False)
+    except SystemExit:
+        pass
+    else:
+        raise AssertionError("root target must be refused without --i-know")
+
+    # bundle: fake artifacts, contents asserted, no key material
+    wheel = tmp / "jarvis_ai-3.14.0-py3-none-any.whl"
+    wheel.write_text("wheel-bytes", encoding="utf-8")
+    exe = tmp / "UMBRA.exe"
+    exe.write_text("exe-bytes", encoding="utf-8")
+    bundle = inj.build_bundle(tmp / "bundle.zip", wheel, exe)
+    with zfmod.ZipFile(bundle) as archive:
+        names = archive.namelist()
+        joined = b"".join(archive.read(name) for name in names)
+    expect("install-umbra.ps1" in names and "install-umbra.sh" in names, f"installers: {names}")
+    expect("umbra-public-key.txt" in names and "README-INSTALL.txt" in names, names)
+    expect(b"BEGIN" not in joined and b".pem" not in joined.lower(), "key material in bundle")
+    bad = tmp / "bad.zip"
+    with zfmod.ZipFile(bad, "w") as archive:
+        archive.writestr("key.pem", "x")
+    try:
+        inj.no_secrets_guard(bad)
+    except SystemExit:
+        pass
+    else:
+        raise AssertionError("guard must refuse private key material")
+
+    # dry-run: full plan, zero network; and --yes is required to execute
+    out = io.StringIO()
+    code = inj.run_install(
+        Console(file=out, force_terminal=False), "linux", "umbra@192.168.1.50",
+        apk=None, systemd=False, dry_run=True, yes=False, i_know=False,
+    )
+    expect(code == 0 and "Dry run" in out.getvalue(), out.getvalue())
+    out2 = io.StringIO()
+    code2 = inj.run_install(
+        Console(file=out2, force_terminal=False), "linux", "umbra@192.168.1.50",
+        apk=None, systemd=False, dry_run=False, yes=False, i_know=False,
+    )
+    expect(code2 == 1 and "--yes" in out2.getvalue(), out2.getvalue())
+
+
 def main() -> int:
     check("version string", version_string)
     check("registry builds with 22 tools", registry_built)
@@ -2386,6 +2468,7 @@ def main() -> int:
     check("api endpoints + auth", lambda: api_endpoints_and_auth(tmp_path))
     check("overlay no-ui paths", lambda: overlay_no_ui(tmp_path))
     check("plugin scaffolds", lambda: plugin_scaffolds(tmp_path))
+    check("inject scan + plans + bundle", lambda: inject_scan_plan_bundle(tmp_path))
 
     check("BrainChain failover", chain_failover)
     check("BrainChain non-transient raises", chain_non_transient_raises)

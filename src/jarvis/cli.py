@@ -499,6 +499,7 @@ def _dispatch(argv: list[str] | None = None) -> int:
             "  serve       the Bridge: full agent over the LAN (PRO) · serve --api: local API\n"
             "  overlay     always-on-top companion beside your other apps\n"
             "  plugin      scaffold <vscode|browser> --out <dir> - app-injection starters\n"
+            "  inject      scan | install | bundle - put UMBRA on another device\n"
             "  api         token rotate | token show - the local API credential\n"
             "  dashboard   the Mission Control: local web dashboard\n"
             "  setup       run the onboarding wizard (setup --yes for CI)\n"
@@ -649,6 +650,10 @@ def _dispatch(argv: list[str] | None = None) -> int:
             "host's own settings at runtime; see the generated README.[/]"
         )
         return 0
+    if argv and argv[0] == "inject":
+        from .inject import run_inject
+
+        return run_inject(console, argv[1:])
     if argv and argv[0] == "profile":
         from .profiles import create_profile, delete_profile, list_profiles, use_profile
 

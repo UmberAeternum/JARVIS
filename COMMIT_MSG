@@ -1,31 +1,28 @@
-Mark XXVI: app injection (local API + overlay + plugin scaffolds)
+Mark XXVII: device injection (scan + install + bundle)
 
-UMBRA becomes usable from within other applications.
+One command installs UMBRA on another device.
 
-- api.py: jarvis serve --api starts a loopback-only, token-authenticated
-  JSON API (127.0.0.1 hard-bound; the LAN Bridge stays a separate PRO
-  command). Endpoints: GET /health, GET /tools (tier-gated registry),
-  POST /chat (synchronous full agent turn; 409 when busy). Token lives
-  in <config>/api-token (0600 POSIX), rotatable via jarvis api token
-  rotate (shown once) / show (masked). LITE tier: same trust envelope
-  as the dashboard (loopback + token). Confirmation-gated tools are
-  auto-DENIED over the API - the model points the user at the dashboard
-  or Bridge for interactive approvals. Nothing is logged, least of all
-  the token. API turns are logged to the conversation store (parity).
-- overlay.py: jarvis overlay opens an always-on-top Tkinter companion
-  (status + query box + last reply) talking to the local API.
-  --attach <process> best-effort finds the process (psutil) and tags
-  sent messages with a context line - the overlay observes nothing by
-  itself. --clickthrough is display-only on Windows. Degrades to a
-  console companion without Tkinter; --no-ui runs headless (status
-  once, clean exit 0) for tests and scripting.
-- plugins.py: jarvis plugin scaffold vscode|browser --out <dir> writes
-  minimal starters that call the API (VS Code command + settings; MV3
-  manifest + service worker + popup). No auto-install, no store
-  publishing, no token embedded in generated files - tokens are
-  configured at runtime through each host's own storage.
-- Tests: API auth (missing/invalid/valid/rotated tokens), loopback bind
-  assertion, tier gating over /tools, chat round-trip, 409 busy,
-  overlay no-ui offline + online paths, scaffold file/manifest schema
-  and secret-free assertions.
-- Version 3.13.0.
+- inject.py: jarvis inject scan sweeps the local /24 on telling ports
+  (22 ssh, 445 smb, 5555 adb, 8775 UMBRA API) with a threaded TCP sweep
+  (stdlib; ICMP needs raw sockets) and prints host + OS guess +
+  install feasibility. jarvis inject install builds the exact plan for
+  windows (scp + ssh silent installer), linux (scp + bash installer,
+  optional systemd --user unit) or android (adb install -r), prints it
+  with --dry-run (ZERO network calls), and executes only with --yes.
+  jarvis inject bundle writes an offline installer zip: wheel (built on
+  demand), UMBRA.exe when present, generated install-umbra.ps1/.sh,
+  README, and the PUBLIC key text - never any private material
+  (no_secrets_guard refuses .pem/.key/private members).
+- Safety model: plans are pure data; runner.py is the single execution
+  point (argument-list subprocesses, shell=False, no shell parser ever
+  sees target or plan text). Targets are regex-validated to a strict
+  [user@]host charset before any argv exists; remote ssh commands are
+  module constants. Passwords are never asked for or stored (SSH
+  keys/agent only); root/admin targets refused without --i-know;
+  WinRM not implemented - the plan prints the manual command instead
+  (noted assumption). Thin wrappers: scripts/inject.sh + inject.ps1.
+- Tests: sweep finds a live loopback listener; plans for all three OSes;
+  unsafe-target and root guards; bundle contents (installers + public
+  key + README, no key material, guard refuses a planted .pem); dry-run
+  prints the plan; --yes required to execute.
+- Version 3.14.0.
