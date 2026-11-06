@@ -122,6 +122,10 @@ PAGE = r"""<!doctype html>
   .ring { width: 54px; height: 54px; border-radius: 50%; display: flex; align-items: center;
     justify-content: center; color: var(--cyan); font-size: 11px; }
   .ring small { color: var(--dim); font-size: 9px; letter-spacing: .1em; }
+  [hidden] { display: none !important; }
+  @media (prefers-reduced-motion: reduce) {
+    * { animation: none !important; transition: none !important; }
+  }
 </style>
 </head>
 <body>
@@ -132,28 +136,28 @@ PAGE = r"""<!doctype html>
     <span id="ver" class="muted"></span>
   </div>
 </header>
-<nav id="tabs">
-  <button data-tab="chat" class="active">CHAT</button>
-  <button data-tab="health">THE ORACLE</button>
-  <button data-tab="memory">MEMORY</button>
-  <button data-tab="board">BOARD</button>
-  <button data-tab="watch">WATCHTOWER</button>
-  <button data-tab="trust">TRUST</button>
-  <button data-tab="settings">SETTINGS</button>
+<nav id="tabs" role="navigation" aria-label="Dashboard tabs">
+  <button data-tab="chat" class="active" aria-selected="true">CHAT</button>
+  <button data-tab="health" aria-selected="false">THE ORACLE</button>
+  <button data-tab="memory" aria-selected="false">MEMORY</button>
+  <button data-tab="board" aria-selected="false">BOARD</button>
+  <button data-tab="watch" aria-selected="false">WATCHTOWER</button>
+  <button data-tab="trust" aria-selected="false">TRUST</button>
+  <button data-tab="settings" aria-selected="false">SETTINGS</button>
 </nav>
 <div id="scanlines"></div>
 <div id="boot">SYSTEMS ONLINE</div>
-<div id="vitals" style="max-width:980px; margin:0 auto; border:1px solid rgba(0,229,255,.18); border-radius:8px;"></div>
+<div id="vitals" role="status" aria-label="System vitals" style="max-width:980px; margin:0 auto; border:1px solid rgba(0,229,255,.18); border-radius:8px;"></div>
 <main>
   <section id="tab-chat" class="active">
     <div class="card">
       <h3>CONSOLE - FULL AGENT</h3>
       <div class="muted" style="margin-bottom:8px">All tools live. Dangerous actions ask here, as APPROVE/DENY. Every turn is logged to your local conversation store. SPEAK uses your browser's own voice - on-device only.</div>
-      <div id="chatlog"></div>
+      <div id="chatlog" role="log" aria-label="Chat log"></div>
       <div class="row">
-        <input id="chatinput" placeholder="Command the agent, Sir... (Enter to send)" autocomplete="off">
-        <button class="act" onclick="sendChat()">SEND</button>
-        <button id="speakbtn" class="mini" onclick="toggleSpeak()">SPEAK: OFF</button>
+        <input id="chatinput" placeholder="Command the agent, Sir... (Enter to send)" autocomplete="off" aria-label="Ask UMBRA">
+        <button class="act" onclick="sendChat()" aria-label="Send message">SEND</button>
+        <button id="speakbtn" class="mini" onclick="toggleSpeak()" aria-label="Toggle spoken replies">SPEAK: OFF</button>
       </div>
     </div>
     <div class="card">
@@ -223,7 +227,7 @@ PAGE = r"""<!doctype html>
       <div class="muted" style="margin-bottom:8px">What the agent may reach right now. Grants expire on their own - and die instantly when you say so. New grants require the typed phrase in the CLI; this page can only take them away.</div>
       <div id="tiercards">loading...</div>
       <div class="row" style="align-items:center">
-        <button class="act danger" onclick="revokeAll()">REVOKE ALL</button>
+        <button class="act danger" onclick="revokeAll()" aria-label="Revoke all access tier grants">REVOKE ALL</button>
         <span id="integrity" class="chip">LEDGER: ...</span>
       </div>
     </div>
@@ -294,8 +298,12 @@ var TAB_LOADERS = {
 };
 document.querySelectorAll("nav button").forEach(function (btn) {
   btn.addEventListener("click", function () {
-    document.querySelectorAll("nav button").forEach(function (b) { b.classList.remove("active"); });
+    document.querySelectorAll("nav button").forEach(function (b) {
+      b.classList.remove("active");
+      b.setAttribute("aria-selected", "false");
+    });
     btn.classList.add("active");
+    btn.setAttribute("aria-selected", "true");
     document.querySelectorAll("main section").forEach(function (s) { s.classList.remove("active"); });
     $("tab-" + btn.dataset.tab).classList.add("active");
     TAB_LOADERS[btn.dataset.tab]();

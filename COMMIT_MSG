@@ -1,11 +1,8 @@
-Phase 7: trust dashboard + phone companion
+Phase 9: accessibility + performance budget + release prep
 
-- Dashboard: /api/access (per-tier grants, log tail, integrity),
-  /api/access/revoke (instant), /api/privacy (local vs cloud counts,
-  spend today); TRUST tab with per-tier cards, REVOKE ALL button,
-  live action log, privacy meter.
-- Bridge: /api/briefing endpoint; PAGE_BRIDGE gains a Briefing button
-  and PWA meta tags for phone installation.
-- Tests: endpoint auth, revoke confirmation, privacy counts, briefing
-  content, no secrets in responses.
-- Version 3.26.0.
+- dashboard_page.py: aria-labels on interactive elements, role=log on
+  the chat log, role=navigation on tabs, role=status on vitals,
+  aria-selected on tab buttons, prefers-reduced-motion media query.
+- SUPPORT.md: performance budget section (cold start < 3 s, first token
+  < 2 s local, dashboard < 1 s, eval < 30 s).
+- Version 3.27.0.

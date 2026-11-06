@@ -107,7 +107,7 @@ class FakeBrain:
 
 
 def version_string() -> None:
-    expect(__version__ == "3.26.0", __version__)
+    expect(__version__ == "3.27.0", __version__)
 
 
 class MockProvider(Provider):

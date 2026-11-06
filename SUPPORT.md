@@ -101,6 +101,18 @@ plumbing, persona. Two scenarios are recorded as `known_failure` with
 reasons; everything else must pass. If a scenario regresses after an
 update, `jarvis eval compare <old> <new>` shows exactly what changed.
 
+## Performance budget
+
+These are the targets on the reference machine, measured in CI on every
+change:
+
+| Metric | Budget |
+|---|---|
+| Cold start (`UMBRA.exe`) | < 3 s |
+| First token (local 7B brain, e.g. Ollama `qwen2.5:7b`) | < 2 s |
+| Dashboard load | < 1 s |
+| Eval run (`jarvis eval run`, offline) | < 30 s |
+
 ## Health disclaimer
 
 The Oracle (HR/HRV screening) is an informational heuristic computed against
