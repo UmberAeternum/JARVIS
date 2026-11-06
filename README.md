@@ -5,7 +5,9 @@
 
 **The shadow that works for you.** A local-first AI assistant for your PC and your pocket — it hears you, sees your screen, remembers what you tell it, anticipates, and speaks. Built on a safety architecture where every powerful action passes a human confirmation gate.
 
-UMBRA works with a **cloud brain** (Z.AI GLM, OpenAI, Google Gemini, or any OpenAI-compatible API) or a **local brain** (Ollama / LM Studio) — and can chain both with automatic failover.
+Six surfaces, one assistant: the desk CLI, a local web dashboard, your phone (native HUD + browser bridge panel), an avatar face, and a WebXR room for headsets — **all of them run the same full agent, with the same tools and the same gate.**
+
+UMBRA works with a **cloud brain** (Z.AI GLM, OpenAI, Google Gemini, or any OpenAI-compatible API) or a **local brain** (Ollama / LM Studio) — and can chain both with automatic failover. With a local brain it runs **fully offline**: chat, memory, tools, dashboard, all of it.
 
 ## Two editions
 
@@ -16,9 +18,12 @@ UMBRA works with a **cloud brain** (Z.AI GLM, OpenAI, Google Gemini, or any Open
 | Reminders + morning briefing | ✓ | ✓ |
 | `/look` screenshots | ✓ | ✓ |
 | Avatar (web face) | ✓ | ✓ |
-| Dashboard (local web mission control) | ✓ | ✓ |
+| **Dashboard** — full agent + streamed replies + spoken answers + session resume | ✓ | ✓ |
+| Session history — searchable, resumable, on every surface | ✓ | ✓ |
+| Profiles + export/import | ✓ | ✓ |
+| Signed update checker + redacted diagnostics | ✓ | ✓ |
 | `/live` screen sharing | — | ✓ |
-| **Bridge** — full agent over your LAN | — | ✓ |
+| **Bridge** — full agent + session history on your phone | — | ✓ |
 | **Portal** — WebXR room for headsets | — | ✓ |
 | **Screen control** — click/type/scroll | — | ✓ |
 | **Watchtower** — ambient rules | — | ✓ |
@@ -82,6 +87,25 @@ jarvis import backup.json           # restores into the active profile (merge, n
 | Sentinel (proactive daemon) | `jarvis sentinel` |
 | The Oracle (health report) | `jarvis health` |
 | Diagnostics (redacted support bundle) | `jarvis diagnostics bundle` |
+
+## Command reference
+
+| Command | What it does |
+|---|---|
+| `umbra` / `python -m jarvis` | The assistant — chat with all tools, confirmations, streaming |
+| `jarvis dashboard` | Local web mission control (full agent, streaming, SPEAK, resume) |
+| `jarvis setup` | Onboarding wizard — `--yes` for CI scripting, `--local` for Ollama |
+| `jarvis settings show / set / reset` | Inspect and change configuration (secrets always masked) |
+| `jarvis profile list / create / use / delete` | Isolated identities, each with its own data |
+| `jarvis export` / `jarvis import` | Move data between machines or profiles |
+| `jarvis update check` | Look for a newer signed release (report-only) |
+| `jarvis diagnostics bundle` | Redacted support bundle to attach to requests |
+| `jarvis health` | The Oracle: HR/HRV risk screening |
+| `jarvis sentinel` | Reminders + spoken morning briefing daemon |
+| `jarvis face` / `jarvis portal` | Avatar face · WebXR room (portal: PRO) |
+| `jarvis serve` | PRO: the Bridge — full agent + history over your LAN |
+| `jarvis watch` / `jarvis wake` | Ambient screen observation · hands-free voice |
+| `jarvis license activate / status` | PRO licensing |
 
 ## Security model
 
