@@ -190,6 +190,14 @@ class DiagnosticsConfig:
 
 
 @dataclass
+class AccessConfig:
+    """Mark XXXI: EDITH-protocol grant window. The grant itself is never
+    settable here - only its expiry window is configurable."""
+
+    window_hours: int = 24  # full access auto-revokes after this many hours
+
+
+@dataclass
 class AmbientConfig:
     """Mark XXVIII: proactive nudges. Strictly opt-in, rate-limited, quiet
     hours respected; per-signal toggles (battery/reminders/health)."""
@@ -216,6 +224,7 @@ class Config:
     diagnostics: DiagnosticsConfig = field(default_factory=DiagnosticsConfig)
     ambient: AmbientConfig = field(default_factory=AmbientConfig)
     hud: HudConfig = field(default_factory=HudConfig)
+    access: AccessConfig = field(default_factory=AccessConfig)
     created_at: str = ""
     updated_at: str = ""
 
@@ -286,6 +295,9 @@ class Config:
                 "sound": self.hud.sound,
                 "typed": self.hud.typed,
                 "boot": self.hud.boot,
+            },
+            "access": {
+                "window_hours": self.access.window_hours,
             },
             "created_at": self.created_at,
             "updated_at": self.updated_at,
@@ -373,6 +385,11 @@ class Config:
         return HudConfig(**{k: v for k, v in (raw or {}).items() if k in known})
 
     @classmethod
+    def _access_from(cls, raw: dict | None) -> AccessConfig:
+        known = {f.name for f in fields(AccessConfig)}
+        return AccessConfig(**{k: v for k, v in (raw or {}).items() if k in known})
+
+    @classmethod
     def _from_modern(cls, raw: dict) -> "Config":
         """v2/v3/v4 share every key except voice and vision (defaults fill in)."""
         use_keyring = bool(raw.get("use_keyring", False))
@@ -388,6 +405,7 @@ class Config:
             diagnostics=cls._diagnostics_from(raw.get("diagnostics")),
             ambient=cls._ambient_from(raw.get("ambient")),
             hud=cls._hud_from(raw.get("hud")),
+            access=cls._access_from(raw.get("access")),
             created_at=raw.get("created_at", ""),
             updated_at=raw.get("updated_at", ""),
         )

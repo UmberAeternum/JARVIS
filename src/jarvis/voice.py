@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import json
 import re
+import threading
 import time
 import zipfile
 from pathlib import Path
@@ -99,6 +100,17 @@ def tts_available() -> tuple[bool, str]:
             "install it with: pip install jarvis-ai[voice]"
         )
     return True, ""
+
+
+def _barge_triggered(levels: list[float], floor: float = SILENCE_FLOOR, frames: int = 3) -> bool:
+    """Barge-in detector (Mark XXVII): True when `frames` consecutive mic
+    levels exceed the speech floor - the user is talking over the reply."""
+    run = 0
+    for value in levels:
+        run = run + 1 if value > floor * 8 else 0
+        if run >= frames:
+            return True
+    return False
 
 
 def strip_markdown(text: str) -> str:
@@ -383,13 +395,16 @@ class VoiceIO:
 
     # ------------------------------------------------------------------ mouth
 
-    def speak(self, text: str) -> bool:
+    def speak(self, text: str, barge_in: bool = False) -> bool:
         """Speak a reply aloud. Returns False (with last_error set) on failure.
 
         profile (Mark XXIX): "jarvis" selects a British-English SAPI voice
         (dry, precise butler register) at a slightly reduced rate; any other
         profile value falls back to the system default voice - the text path
         never depends on a matching voice existing.
+
+        barge_in (Mark XXVII): while speaking, the microphone is monitored and
+        the user talking over the reply stops the speech immediately.
         """
         if not self.tts_enabled or not text.strip():
             return False
@@ -406,11 +421,40 @@ class VoiceIO:
             engine = pyttsx3.init()  # fresh engine per utterance: reliable on SAPI5
             if self.profile == "jarvis":
                 _apply_jarvis_voice(engine)
+            monitor_stop = threading.Event()
+            if barge_in:
+                def monitor() -> None:
+                    try:
+                        import numpy as np
+                        import sounddevice as sd
+
+                        levels: list[float] = []
+                        with sd.InputStream(
+                            samplerate=SAMPLE_RATE, channels=1, dtype="int16",
+                            blocksize=4000, device=self.mic_device,
+                        ):
+                            while not monitor_stop.is_set():
+                                frames, _overflow = sd.read(4000)
+                                pcm = np.squeeze(frames)
+                                levels.append(
+                                    float(np.sqrt(np.mean(pcm.astype("float32") ** 2)))
+                                )
+                                if _barge_triggered(levels[-8:]):
+                                    try:
+                                        engine.stop()
+                                    except Exception:
+                                        pass
+                                    return
+                    except Exception:
+                        return  # no microphone: barge-in unavailable this round
+
+                threading.Thread(target=monitor, daemon=True).start()
             try:
                 engine.say(spoken)
                 engine.runAndWait()
             finally:
                 engine.stop()
+                monitor_stop.set()
             return True
         except Exception as exc:
             self.last_error = f"TTS failed: {exc}"

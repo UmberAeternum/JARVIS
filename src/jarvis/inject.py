@@ -210,6 +210,7 @@ def run_install(console, os_name: str, target: str, apk: Path | None,
     _root_guard(target, i_know)
     steps = build_plan(os_name, target, apk=apk, systemd=systemd)
     if dry_run:
+        # read-only planning: allowed without a grant (zero network, zero reach)
         console.print("[cyan]Dry run - the plan (zero network calls made):[/]")
         print_plan(console, steps)
         return 0
@@ -217,9 +218,34 @@ def run_install(console, os_name: str, target: str, apk: Path | None,
         console.print("[yellow]A real install is about to run on the target.[/]")
         console.print("Review it first with [bold]--dry-run[/], then add [bold]--yes[/] to execute.")
         return 1
+
+    # EDITH-protocol: real installs need FULL ACCESS + a per-target confirm
+    from .access import require_full
+
+    if not require_full("inject install -> " + target):
+        console.print(
+            "[red]Full access is not granted.[/] A device install needs it:\n"
+            "  [bold]jarvis access grant --full[/]  (interactive; expires in 24h)"
+        )
+        return 1
+    from rich.prompt import Confirm
+
+    if not Confirm.ask(f"[yellow]Install UMBRA onto {target} right now?[/]", default=False):
+        from .access import log_append
+
+        log_append("install_aborted", "per-target confirmation declined: " + target)
+        console.print("[dim]Aborted - no install.[/]")
+        return 1
+
     from .runner import execute_steps
 
-    return execute_steps(steps, console)
+    code = execute_steps(steps, console)
+    from .access import log_append
+
+    log_append("install_done" if code == 0 else "install_failed", "target: " + target)
+    if code == 0:
+        console.print("[green]Injected, Sir. UMBRA now lives on the target.[/]")
+    return code
 
 
 # ----------------------------------------------------------------- bundle

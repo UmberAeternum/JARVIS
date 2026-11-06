@@ -1,22 +1,30 @@
-Mark XXX: README rewrite + release docs (capstone)
+Mark XXXI (part 1): the EDITH protocol - grants, ledger, revocation
 
-- README.md fully rewritten for the finished product: the tagline states
-  the one-mind-many-bodies story and adds the explicit "No holograms"
-  callout; the editions table now lists app injection, the personality
-  pack and HUD rings in LITE; Install is reorganized (standalone exe
-  first, Android APK, source, then the one-command device-injection
-  block); App injection and Device injection are consolidated into
-  tighter sections; a new "Living presence" section covers wake word,
-  ambient nudges (default OFF, rate-limited, quiet hours), personality,
-  briefing and the voice identity; the command reference table covers
-  every surface (serve/overlay/scaffolds/inject/wake/personality/voice/
-  hud/intro); the security model gains loopback-by-default and
-  constant-remote-commands lines; Privacy mentions the offline bundle
-  carrying the public key only.
-- docs/index.html: THE BODIES grid gains INJECTION and PRESENCE cards;
-  install copy notes the fully local Ollama brain.
-- install-instructions.txt: everyday commands gain wake, personality,
-  voice set jarvis, hud theme and intro; the LITE column now lists app
-  injection, session history and the personality pack.
-- Docs + release mark: no code changes, suite stays 72 checks.
-- Version 3.17.0.
+Default state = ZERO reach. Every reach capability is denied until the
+user interactively types "I grant UMBRA full access".
+
+- access.py: the grant lives in access-state.json with a device
+  fingerprint and a hard expiry (config access.window_hours, default 24h)
+  - it must be re-granted after expiry and never matches another machine.
+  Created ONLY by jarvis access grant --full with the typed confirmation
+  phrase - never by config files, env vars, CLI flags, API calls, or
+  automation. require_full() gates every reach capability and logs the
+  attempt either way.
+- Tamper-evident ledger: access-log.jsonl with chained SHA-256 entries;
+  jarvis access log prints it with integrity verdicts; jarvis access
+  status / revoke --all complete the surface.
+- Gates wired: jarvis inject install refuses without the grant (--dry-run
+  stays available: it is read-only planning with zero reach) and demands
+  a per-target confirmation even under full access; jarvis serve --api
+  serves read-only /health without the grant and requires it for /tools
+  and /chat (each authorized turn lands in the ledger); jarvis overlay
+  --attach refuses without it.
+- Hard prohibitions, test-enforced: scan alone performs ZERO installs;
+  wrong phrases, expired grants, foreign fingerprints, and tampered
+  ledger entries are all refused or detected.
+- Barge-in (Mark XXVII item): while speaking, the mic is monitored and
+  the user talking over the reply stops the speech (pure detector
+  _barge_triggered + monitor thread; silent degradation without a mic).
+- Briefing continuity: the morning briefing recaps the most recent
+  recorded session (title + turns).
+- Version 3.18.0.

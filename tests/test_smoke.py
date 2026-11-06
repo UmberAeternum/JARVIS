@@ -106,7 +106,7 @@ class FakeBrain:
 
 
 def version_string() -> None:
-    expect(__version__ == "3.17.0", __version__)
+    expect(__version__ == "3.18.0", __version__)
 
 
 def registry_built() -> None:
@@ -2186,6 +2186,15 @@ def api_endpoints_and_auth(tmp: Path) -> None:
             health = json.loads(resp.read().decode("utf-8"))
             expect(resp.status == 200 and health["ok"] is True, f"health: {health}")
             expect(health["tier"] in ("lite", "pro"), "health tier missing")
+            expect(health.get("full_access") is False,
+                   "/health must report the not-yet-granted access state")
+
+            # Mark XXXI: /tools and /chat are reach capabilities - they need
+            # the EDITH full-access grant (it lives in this patched tmp dir)
+            from jarvis import access as access_mod
+
+            granted, grant_message = access_mod.grant_full(access_mod.CONFIRMATION_PHRASE)
+            expect(granted is True, grant_message)
 
             conn.request("GET", "/tools", headers={"X-Jarvis-Token": token})
             resp = conn.getresponse()
@@ -2562,6 +2571,162 @@ def hud_voice_intro(tmp: Path) -> None:
         config.config_dir = original
 
 
+def edith_protocol(tmp: Path) -> None:
+    """Mark XXXI - the EDITH protocol: grants, ledger, refusal, no self-prop."""
+    import io
+    import socket
+
+    from rich.console import Console
+
+    from jarvis import access, inject
+
+    original = config.config_dir
+    config.config_dir = lambda: tmp / "cfgedith"
+    try:
+        # default deny on a fresh machine
+        expect(access.full_active() is False, "fresh machine must have zero reach")
+        expect(access.status_text().startswith("FULL ACCESS: not granted"), "status")
+
+        # inject install: refuses without grant - no prompts, no network
+        out = io.StringIO()
+        code = inject.run_install(
+            Console(file=out, force_terminal=False), "linux", "umbra@192.168.1.50",
+            apk=None, systemd=False, dry_run=False, yes=True, i_know=False,
+        )
+        expect(code == 1 and "Full access is not granted" in out.getvalue(),
+               f"pre-grant install must refuse: {out.getvalue()}")
+
+        # grant: wrong phrase refused, right phrase granted (interactive path)
+        ok, _ = access.grant_full("wrong phrase")
+        expect(ok is False, "wrong phrase must not grant")
+        ok, message = access.grant_full(access.CONFIRMATION_PHRASE)
+        expect(ok is True, message)
+        expect(access.full_active() is True, "grant must be active")
+        expect("granted since" in access.status_text(), access.status_text())
+        # with grant: per-target confirmation (declined here - no network, no install)
+        out2 = io.StringIO()
+        from rich.prompt import Confirm
+
+        saved_ask = Confirm.ask
+        Confirm.ask = classmethod(lambda cls, *a, **k: False)
+        try:
+            code2 = inject.run_install(
+                Console(file=out2, force_terminal=False), "linux", "umbra@192.168.1.50",
+                apk=None, systemd=False, dry_run=False, yes=True, i_know=False,
+            )
+        finally:
+            Confirm.ask = saved_ask
+        expect(code2 == 1 and "Aborted" in out2.getvalue(), f"declined confirm: {out2.getvalue()}")
+
+        # expiry + fingerprint
+        import time as time_mod
+
+        now = time_mod.time()
+        state = {"full": True, "granted_ts": now - 100, "expires_ts": now - 1,
+                 "fingerprint": access.device_fingerprint()}
+        access._save_state(state)
+        expect(access.full_active() is False, "expired grant must be inactive")
+        state["expires_ts"] = now + 10_000
+        state["fingerprint"] = "0" * 16
+        access._save_state(state)
+        expect(access.full_active() is False, "foreign fingerprint must be inactive")
+        # no re-grant here: the API section below exercises the pre-grant
+        # refusal and grants along the API-independent path at that point
+
+        # ledger: chained integrity, tamper detection
+        access.log_append("reach_allowed", "probe one")
+        access.log_append("reach_denied", "probe two")
+        entries = access.log_entries()
+        expect(all(e.get("integrity") == "ok" for e in entries), "ledger must verify")
+        bad = tmp / "bad-ledger.jsonl"
+        lines = [json.dumps({"ts": "t", "action": "forged", "detail": "x", "hash": "0" * 64})]
+        bad.write_text("\n".join(lines), encoding="utf-8")
+        saved_log_path = access._log_path
+        access._log_path = lambda: bad
+        try:
+            expect(access.verify_log() is False, "tampered ledger must be detected")
+        finally:
+            access._log_path = saved_log_path
+
+        # API: /health works without full access; /chat requires it
+        import http.client
+
+        from jarvis import api as api_mod
+
+        state2 = api_mod.ApiState(config.Config())
+        state2.agent.chain = types.SimpleNamespace(
+            create_chat=lambda **kw: FakeResp(FakeMsg("granted reply")))
+        server, port, thread = api_mod.start_server(state2, preferred_port=0)
+        conn = http.client.HTTPConnection("127.0.0.1", port, timeout=10)
+        try:
+            token = api_mod.ensure_token()
+            expect(bool(token), "EDITH api section must have a token")
+            conn.request("GET", "/health", headers={"X-Jarvis-Token": token})
+            resp = conn.getresponse()
+            resp.read()
+            expect(resp.status == 200, "read-only /health must work without grant")
+            conn.request("POST", "/chat",
+                         body=json.dumps({"text": "hello"}),
+                         headers={"X-Jarvis-Token": token, "Content-Type": "application/json"})
+            resp = conn.getresponse()
+            denied = json.loads(resp.read().decode("utf-8"))
+            expect(resp.status == 403 and "full access" in denied.get("error", ""),
+                   f"pre-grant /chat must refuse: {denied}")
+            # grant via the API-independent path, then /chat works and is logged
+            access.grant_full(access.CONFIRMATION_PHRASE)
+            conn.request("POST", "/chat",
+                         body=json.dumps({"text": "hello"}),
+                         headers={"X-Jarvis-Token": token, "Content-Type": "application/json"})
+            resp = conn.getresponse()
+            reply = json.loads(resp.read().decode("utf-8"))
+            expect(reply.get("reply") == "granted reply", f"post-grant chat: {reply}")
+            actions = [e.get("action") for e in access.log_entries()]
+            expect("api_chat" in actions, "API turn must appear in the access ledger")
+        finally:
+            conn.close()
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=5)
+
+        # overlay attach without grant -> refused
+        access.revoke_all()
+        out3 = io.StringIO()
+        from jarvis.overlay import run_overlay
+
+        code3 = run_overlay(Console(file=out3, force_terminal=False),
+                            attach_name="explorer", no_ui=True)
+        expect(code3 == 1 and "Full access is not granted" in out3.getvalue(),
+               f"attach must refuse: {out3.getvalue()}")
+
+        # hard prohibition: scan alone performs ZERO installs (ledger stays clean)
+        listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        listener.bind(("127.0.0.1", 0))
+        listener.listen(1)
+        port2 = listener.getsockname()[1]
+        try:
+            out4 = io.StringIO()
+            inj_console = Console(file=out4, force_terminal=False)
+            actions_before_scan = [e.get("action") for e in access.log_entries()]
+            inject.run_scan(inj_console)  # real sweep; installs nothing by design
+            actions_after_scan = [e.get("action") for e in access.log_entries()]
+            expect(actions_after_scan == actions_before_scan,
+                   f"scan must never install or touch the ledger: "
+                   f"{set(actions_after_scan) - set(actions_before_scan)}")
+        finally:
+            listener.close()
+
+        # barge-in detector
+        from jarvis.voice import _barge_triggered
+
+        floor = 0.008
+        expect(not _barge_triggered([floor * 0.5] * 8), "silence must not barge")
+        expect(_barge_triggered([floor * 20] * 3), "speech must barge")
+        expect(not _barge_triggered([floor * 20, floor * 0.5, floor * 20, floor * 0.5] * 2),
+               "intermittent noise must not barge")
+    finally:
+        config.config_dir = original
+
+
 def main() -> int:
     check("version string", version_string)
     check("registry builds with 22 tools", registry_built)
@@ -2635,6 +2800,7 @@ def main() -> int:
     check("inject scan + plans + bundle", lambda: inject_scan_plan_bundle(tmp_path))
     check("presence: wake + ambient + personality", lambda: presence_wake_ambient_personality(tmp_path))
     check("hud + voice profile + intro", lambda: hud_voice_intro(tmp_path))
+    check("EDITH protocol", lambda: edith_protocol(tmp_path))
 
     check("BrainChain failover", chain_failover)
     check("BrainChain non-transient raises", chain_non_transient_raises)

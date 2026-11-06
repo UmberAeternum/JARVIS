@@ -400,7 +400,7 @@ def _wake_session(cfg: config.Config, console: Console) -> None:
         if reply is not None:
             console.print(Panel(Markdown(reply), title="J.A.R.V.I.S.", border_style="cyan"))
             try:
-                voice.speak(reply)
+                voice.speak(reply, barge_in=True)
             except Exception as exc:
                 console.print(f"[dim](speech failed: {exc})[/]")
 
@@ -501,6 +501,7 @@ def _dispatch(argv: list[str] | None = None) -> int:
             "  plugin      scaffold <vscode|browser> --out <dir> - app-injection starters\n"
             "  inject      scan | install | bundle - put UMBRA on another device\n"
             "  personality show | set - honorific, verbosity, humor, proactivity\n"
+            "  access      grant --full | status | log | revoke --all (EDITH protocol)\n"
             "  voice       show | set <default|jarvis> - TTS voice profile\n"
             "  hud         show | theme <hologram|minimal> - dashboard HUD look\n"
             "  intro       the 10-second boot sequence (--no-audio to skip speech)\n"
@@ -654,6 +655,42 @@ def _dispatch(argv: list[str] | None = None) -> int:
             "host's own settings at runtime; see the generated README.[/]"
         )
         return 0
+    if argv and argv[0] == "access":
+        from . import access
+
+        sub = argv[1] if len(argv) > 1 else "status"
+        if sub == "grant":
+            if "--full" not in argv[2:]:
+                console.print("usage: jarvis access grant --full")
+                return 1
+            console.print("[yellow]This grants UMBRA full reach: device installs,")
+            console.print("[yellow]cross-app attachment, and the API's tool endpoints.")
+            console.print(f"[yellow]The grant expires in {access.window_hours()}h and is logged.")
+            typed = console.input("[bold cyan]Type the confirmation phrase> [/]")
+            ok, message = access.grant_full(typed)
+            console.print(f"[{'green' if ok else 'red'}]{message}[/]")
+            return 0 if ok else 1
+        if sub == "status":
+            console.print(access.status_text())
+            return 0
+        if sub == "log":
+            entries = access.log_entries()
+            if not entries:
+                console.print("[dim]The access ledger is empty.[/]")
+                return 0
+            for entry in entries[-40:]:
+                mark = "" if entry.get("integrity") == "ok" else " [red]" + entry.get("integrity", "") + "[/]"
+                console.print(f"  [{entry.get('ts', '?')}] {entry.get('action', '?')}: {entry.get('detail', '')}{mark}")
+            console.print("[dim]integrity: " + ("OK" if access.verify_log() else "TAMPERED") + "[/]")
+            return 0
+        if sub == "revoke":
+            if "--all" not in argv[2:]:
+                console.print("usage: jarvis access revoke --all")
+                return 1
+            console.print("[green]" + access.revoke_all() + "[/]")
+            return 0
+        console.print("usage: jarvis access grant --full | status | log | revoke --all")
+        return 1
     if argv and argv[0] == "voice":
         from .config import VoiceConfig
 

@@ -157,6 +157,19 @@ def compose_briefing() -> str:
     honorific = load_personality().get("honorific", "Sir")
     lines = [f"Good morning, {honorific}. The briefing:"]
 
+    # Mark XXVII: continuity - recap the most recent recorded session
+    try:
+        from .conversations import list_sessions
+
+        sessions = list_sessions(1)
+        if sessions:
+            last = sessions[0]
+            lines.append(
+                f"Last session: {last.get('title', '')} ({last.get('turns', 0)} turns)."
+            )
+    except Exception:
+        pass  # the recap is cosmetic - never break the briefing
+
     report = health.risk_assessment()
     lines.append("Health: " + report.splitlines()[0])
 

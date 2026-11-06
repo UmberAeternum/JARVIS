@@ -74,6 +74,16 @@ def run_overlay(
     clickthrough: bool = False,
 ) -> int:
     token = ensure_token()
+    # EDITH-protocol: cross-app attachment requires full access (Mark XXXI)
+    if attach_name:
+        from .access import require_full
+
+        if not require_full("overlay --attach " + attach_name):
+            console.print(
+                "[red]Full access is not granted.[/] Cross-app attachment needs it:\n"
+                "  [bold]jarvis access grant --full[/]"
+            )
+            return 1
     attach_desc = find_process(attach_name) if attach_name else None
     if no_ui:
         status = fetch_status(api_mod.DEFAULT_PORT, token)

@@ -29,6 +29,7 @@ import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
+from . import access as access_module
 from . import config
 
 DEFAULT_PORT = 8775
@@ -170,6 +171,8 @@ def make_handler(state: ApiState) -> type:
                 return
             path = self.path.split("?")[0].rstrip("/") or "/"
             if path == "/health":
+                # read-only /health is the only endpoint that works without
+                # the EDITH full-access grant (Mark XXXI)
                 from . import __version__, licensing
 
                 self._json(200, {
@@ -179,7 +182,11 @@ def make_handler(state: ApiState) -> type:
                     "brain": state.cfg.brains.primary.provider,
                     "model": state.cfg.brains.primary.model,
                     "busy": state.turn_lock.locked(),
+                    "full_access": access_module.full_active(),
                 })
+                return
+            if not access_module.require_full("api GET " + path):
+                self._json(403, {"error": "full access required - jarvis access grant --full"})
                 return
             if path == "/tools":
                 self._json(200, {"tools": state.registry.descriptions()})
@@ -187,12 +194,18 @@ def make_handler(state: ApiState) -> type:
             self._json(404, {"error": "not found"})
 
         def do_POST(self) -> None:  # noqa: N802 - stdlib naming
+            # Drain the request body BEFORE any early 403: replying with the
+            # body unread desyncs HTTP/1.1 keep-alive (the next request on
+            # this connection would parse leftover body bytes).
+            length = int(self.headers.get("Content-Length", "0") or 0)
+            raw = self.rfile.read(length) if length else b"{}"
             if not self._authorized():
                 self._json(403, {"error": "forbidden - missing or invalid API token"})
                 return
             path = self.path.split("?")[0].rstrip("/") or "/"
-            length = int(self.headers.get("Content-Length", "0") or 0)
-            raw = self.rfile.read(length) if length else b"{}"
+            if path != "/health" and not access_module.require_full("api POST " + path):
+                self._json(403, {"error": "full access required - jarvis access grant --full"})
+                return
             try:
                 payload = json.loads(raw.decode("utf-8"))
             except (ValueError, UnicodeDecodeError):
@@ -215,6 +228,7 @@ def make_handler(state: ApiState) -> type:
                 except Exception as exc:
                     self._json(500, {"error": f"{type(exc).__name__}: {exc}"})
                     return
+                access_module.log_append("api_chat", "turn completed (" + str(len(reply)) + " chars)")
                 self._json(200, {"reply": reply})
                 return
             self._json(404, {"error": "not found"})
