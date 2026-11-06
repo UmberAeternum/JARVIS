@@ -75,6 +75,16 @@ jarvis export --include-secrets     # requires confirmation; the file holds plai
 jarvis import backup.json           # restores into the active profile (merge, never destroy)
 ```
 
+## App injection
+
+UMBRA can live inside your other tools, not just its own console:
+
+- **Local API** — `jarvis serve --api` exposes a token-authenticated JSON API on 127.0.0.1: `GET /health`, `GET /tools`, `POST /chat`. Rotate the token with `jarvis api token rotate` (shown once), view a masked reminder with `jarvis api token show`.
+- **Overlay** — `jarvis overlay` floats an always-on-top companion beside any app: live API status, last reply, and a query box. `--attach <process>` tags your questions with the app you're working in; `--clickthrough` makes the window pure display.
+- **Scaffolds** — `jarvis plugin scaffold vscode --out <dir>` and `jarvis plugin scaffold browser --out <dir>` generate minimal starter extensions that call the API. No auto-install, no store publishing, no token embedded in generated files.
+
+Gated tools (the kind that need a human yes/no) are auto-denied over the API — use the dashboard or the Bridge for interactive approvals.
+
 ## The bodies
 
 | Surface | Command |

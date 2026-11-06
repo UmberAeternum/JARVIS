@@ -496,7 +496,10 @@ def _dispatch(argv: list[str] | None = None) -> int:
             "  sentinel    the Sentinel: reminders + morning briefing daemon\n"
             "  face        the Avatar: local web face + chat (Mark VI)\n"
             "  portal      the Portal: WebXR room for headsets (Mark VII)\n"
-            "  serve       the Bridge: full agent over the LAN (Mark IX)\n"
+            "  serve       the Bridge: full agent over the LAN (PRO) · serve --api: local API\n"
+            "  overlay     always-on-top companion beside your other apps\n"
+            "  plugin      scaffold <vscode|browser> --out <dir> - app-injection starters\n"
+            "  api         token rotate | token show - the local API credential\n"
             "  dashboard   the Mission Control: local web dashboard\n"
             "  setup       run the onboarding wizard (setup --yes for CI)\n"
             "  settings    show | set <key>=<value> | reset [--yes]\n"
@@ -556,6 +559,18 @@ def _dispatch(argv: list[str] | None = None) -> int:
             return 1
         return run_portal(console)
     if argv and argv[0] == "serve":
+        if "--api" in argv[1:]:
+            # Mark XXVI: the embeddable local API - loopback + token, the same
+            # trust envelope as the dashboard (LITE); the LAN Bridge stays PRO.
+            from .api import run_api
+
+            if config.Config.load() is None:
+                console.print(
+                    "[yellow]No brain configured yet.[/] Run [bold]python -m jarvis[/] "
+                    "once and complete the wizard - the API speaks through that brain."
+                )
+                return 1
+            return run_api(console)
         from .serve import run_bridge
 
         if config.Config.load() is None:
@@ -571,6 +586,69 @@ def _dispatch(argv: list[str] | None = None) -> int:
             )
             return 1
         return run_bridge(console)
+    if argv and argv[0] == "api":
+        from .api import load_token, token_path
+
+        sub = argv[1] if len(argv) > 1 else ""
+        arg2 = argv[2] if len(argv) > 2 else ""
+        if sub == "token" and arg2 == "rotate":
+            from .api import rotate_token
+
+            console.print("[green]API token rotated.[/] Shown once - store it in your client:")
+            console.print(rotate_token())
+            return 0
+        if sub == "token" and arg2 == "show":
+            from .config import mask_key
+
+            console.print(f"token: {mask_key(load_token())}\nfile: {token_path()}")
+            return 0
+        console.print("usage: jarvis api token rotate | jarvis api token show")
+        return 1
+    if argv and argv[0] == "overlay":
+        from .overlay import run_overlay
+
+        rest = argv[1:]
+        attach = None
+        if "--attach" in rest:
+            index = rest.index("--attach")
+            if index + 1 < len(rest):
+                attach = rest[index + 1]
+        return run_overlay(
+            console,
+            attach_name=attach,
+            no_ui="--no-ui" in rest,
+            clickthrough="--clickthrough" in rest,
+        )
+    if argv and argv[0] == "plugin":
+        from .plugins import scaffold_browser, scaffold_vscode
+
+        rest = argv[1:]
+        if (rest[0] if rest else "") != "scaffold" or len(rest) < 3:
+            console.print("usage: jarvis plugin scaffold <vscode|browser> --out <dir>")
+            return 1
+        kind = rest[1]
+        out_dir: Path | None = None
+        if "--out" in rest:
+            index = rest.index("--out")
+            if index + 1 < len(rest):
+                out_dir = Path(rest[index + 1])
+        if out_dir is None:
+            console.print("[red]--out <dir> is required[/]")
+            return 1
+        if kind == "vscode":
+            files = scaffold_vscode(out_dir)
+        elif kind == "browser":
+            files = scaffold_browser(out_dir)
+        else:
+            console.print("[red]unknown scaffold kind - use vscode or browser[/]")
+            return 1
+        for written in files:
+            console.print(f"  wrote {written}")
+        console.print(
+            "[dim]Scaffold only - no auto-install. Configure the token in the\n"
+            "host's own settings at runtime; see the generated README.[/]"
+        )
+        return 0
     if argv and argv[0] == "profile":
         from .profiles import create_profile, delete_profile, list_profiles, use_profile
 

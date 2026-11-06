@@ -106,7 +106,7 @@ class FakeBrain:
 
 
 def version_string() -> None:
-    expect(__version__ == "3.12.0", __version__)
+    expect(__version__ == "3.13.0", __version__)
 
 
 def registry_built() -> None:
@@ -2147,6 +2147,175 @@ def bridge_streaming_roundtrip(tmp: Path) -> None:
         thread.join(timeout=5)
 
 
+def api_endpoints_and_auth(tmp: Path) -> None:
+    """Mark XXVI - app injection: the embeddable local API."""
+    import http.client
+
+    from jarvis import api as api_mod
+
+    original = config.config_dir
+    config.config_dir = lambda: tmp / "cfgapi"
+    try:
+        token = api_mod.ensure_token()
+        expect(bool(token), "ensure_token must produce a token")
+        expect(api_mod.token_path().exists(), "token file missing")
+
+        state = api_mod.ApiState(config.Config())
+        state.agent.chain = types.SimpleNamespace(
+            create_chat=lambda **kw: FakeResp(FakeMsg("api reply, Sir")))
+        server, port, thread = api_mod.start_server(state, preferred_port=0)
+        conn = http.client.HTTPConnection("127.0.0.1", port, timeout=10)
+        try:
+            expect(port > 0, "ephemeral port must be reported")
+            # loopback is a hard property of this API
+            expect(server.server_address[0] == "127.0.0.1",
+                   f"API must bind loopback, got {server.server_address[0]}")
+
+            # auth: missing, invalid, valid
+            conn.request("GET", "/health")
+            resp = conn.getresponse()
+            resp.read()
+            expect(resp.status == 403, "missing token must be refused")
+            conn.request("GET", "/health", headers={"X-Jarvis-Token": "wrong"})
+            resp = conn.getresponse()
+            resp.read()
+            expect(resp.status == 403, "invalid token must be refused")
+
+            conn.request("GET", "/health", headers={"X-Jarvis-Token": token})
+            resp = conn.getresponse()
+            health = json.loads(resp.read().decode("utf-8"))
+            expect(resp.status == 200 and health["ok"] is True, f"health: {health}")
+            expect(health["tier"] in ("lite", "pro"), "health tier missing")
+
+            conn.request("GET", "/tools", headers={"X-Jarvis-Token": token})
+            resp = conn.getresponse()
+            tools = json.loads(resp.read().decode("utf-8"))["tools"]
+            tools_text = json.dumps(tools)
+            expect("memory_save" in tools_text, "expected tool missing from /tools")
+            expect("screen_click" not in tools_text, "LITE gating must hold over the API")
+
+            conn.request("POST", "/chat",
+                         body=json.dumps({"text": "hello"}),
+                         headers={"X-Jarvis-Token": token, "Content-Type": "application/json"})
+            resp = conn.getresponse()
+            reply = json.loads(resp.read().decode("utf-8"))
+            expect(reply.get("reply") == "api reply, Sir", f"chat reply: {reply}")
+
+            # busy: hold the turn lock, next chat must 409
+            expect(state.turn_lock.acquire(blocking=False), "test setup: lock")
+            try:
+                conn.request("POST", "/chat",
+                             body=json.dumps({"text": "again"}),
+                             headers={"X-Jarvis-Token": token, "Content-Type": "application/json"})
+                resp = conn.getresponse()
+                resp.read()
+                expect(resp.status == 409, "concurrent chat must 409")
+            finally:
+                state.turn_lock.release()
+
+            # rotation: old token dies, new token works
+            fresh = api_mod.rotate_token()
+            expect(fresh != token, "rotation must change the token")
+            conn.request("GET", "/health", headers={"X-Jarvis-Token": token})
+            resp = conn.getresponse()
+            resp.read()
+            expect(resp.status == 403, "rotated-away token must be refused")
+            conn.request("GET", "/health", headers={"X-Jarvis-Token": fresh})
+            resp = conn.getresponse()
+            resp.read()
+            expect(resp.status == 200, "rotated-in token must work")
+
+            conn.request("GET", "/api/nope", headers={"X-Jarvis-Token": fresh})
+            resp = conn.getresponse()
+            expect(resp.status == 404, "unknown endpoint")
+            resp.read()
+        finally:
+            conn.close()
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=5)
+    finally:
+        config.config_dir = original
+
+
+def overlay_no_ui(tmp: Path) -> None:
+    """Mark XXVI - overlay logic without UI: clean exit, offline + online."""
+    import io
+
+    from rich.console import Console
+
+    from jarvis import api as api_mod
+    from jarvis.overlay import run_overlay
+
+    original = config.config_dir
+    config.config_dir = lambda: tmp / "cfgovl"
+    try:
+        api_mod.ensure_token()
+
+        # offline: no API running - must exit 0 with an honest status
+        out = io.StringIO()
+        code = run_overlay(Console(file=out, force_terminal=False), no_ui=True)
+        expect(code == 0, "offline no-ui overlay must exit 0")
+        expect("API offline" in out.getvalue(), out.getvalue())
+
+        # online: a running API is reported with its model
+        state = api_mod.ApiState(config.Config())
+        server, port, thread = api_mod.start_server(state, preferred_port=0)
+        try:
+            saved_port = api_mod.DEFAULT_PORT
+            api_mod.DEFAULT_PORT = port
+            try:
+                out2 = io.StringIO()
+                code2 = run_overlay(Console(file=out2, force_terminal=False), no_ui=True)
+                expect(code2 == 0, "online no-ui overlay must exit 0")
+                expect("API online" in out2.getvalue(), out2.getvalue())
+            finally:
+                api_mod.DEFAULT_PORT = saved_port
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=5)
+    finally:
+        config.config_dir = original
+
+
+def plugin_scaffolds(tmp: Path) -> None:
+    """Mark XXVI - scaffolds: shape, manifest schema, no secrets."""
+    import json as jsonlib
+
+    from jarvis.plugins import scaffold_browser, scaffold_vscode
+
+    vsx = tmp / "vsx"
+    files = scaffold_vscode(vsx)
+    names = {f.name for f in files}
+    expect({"package.json", "extension.js", "README.md"} <= names, f"vscode files: {names}")
+    manifest = jsonlib.loads((vsx / "package.json").read_text(encoding="utf-8"))
+    expect(manifest["engines"]["vscode"], "vscode engine missing")
+    expect(manifest["contributes"]["commands"][0]["command"] == "umbra.ask",
+           "vscode command missing")
+    extension_text = (vsx / "extension.js").read_text(encoding="utf-8")
+    expect("/chat" in extension_text, "extension must call /chat")
+    expect("127.0.0.1" in extension_text, "extension must be loopback-only")
+
+    mv3 = tmp / "mv3"
+    files = scaffold_browser(mv3)
+    names = {f.name for f in files}
+    expect({"manifest.json", "background.js", "popup.html", "popup.js", "README.md"} <= names,
+           f"browser files: {names}")
+    manifest = jsonlib.loads((mv3 / "manifest.json").read_text(encoding="utf-8"))
+    expect(manifest["manifest_version"] == 3, "must be MV3")
+    expect("storage" in manifest["permissions"], "storage permission missing")
+    expect(any(h.startswith("http://127.0.0.1") for h in manifest["host_permissions"]),
+           "host permissions must be loopback-only")
+
+    # no secrets of any kind in generated output
+    for folder in (vsx, mv3):
+        for path in folder.iterdir():
+            text = path.read_text(encoding="utf-8")
+            expect("UMBRA-" not in text, f"license-shaped string in {path.name}")
+            expect("BEGIN" not in text, f"key header in {path.name}")
+
+
 def main() -> int:
     check("version string", version_string)
     check("registry builds with 22 tools", registry_built)
@@ -2214,6 +2383,9 @@ def main() -> int:
     check("history endpoints + resume", lambda: history_endpoints_and_resume(tmp_path))
     check("dashboard streaming round-trip", lambda: dashboard_streaming_roundtrip(tmp_path))
     check("bridge streaming round-trip", lambda: bridge_streaming_roundtrip(tmp_path))
+    check("api endpoints + auth", lambda: api_endpoints_and_auth(tmp_path))
+    check("overlay no-ui paths", lambda: overlay_no_ui(tmp_path))
+    check("plugin scaffolds", lambda: plugin_scaffolds(tmp_path))
 
     check("BrainChain failover", chain_failover)
     check("BrainChain non-transient raises", chain_non_transient_raises)

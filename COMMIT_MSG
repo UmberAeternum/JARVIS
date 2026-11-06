@@ -1,22 +1,31 @@
-Mark XXV: the Portal speaks
+Mark XXVI: app injection (local API + overlay + plugin scaffolds)
 
-The XR room was the last surface running a stripped conversation-only
-chat. It now runs the SAME agent as every other body - the last holdout
-falls, and all six surfaces share one brain, one gate, one stream.
+UMBRA becomes usable from within other applications.
 
-- portal.py: PortalState is now a BridgeState subclass (the Mark IX
-  machinery wearing the portal's token gate): full 24-tool agent,
-  worker-thread turns, the event stream, and confirmations. New
-  endpoints: GET /api/events (bounded long-poll), POST /api/confirm;
-  POST /api/chat is now async (started / 409 busy). The plain-chat
-  history and SYSTEM_PROMPT are gone - the Agent composes the persona.
-- portal_page.py: the canvas chat panel renders the event stream -
-  "..." placeholder cleared on the first event, YOU lines from user
-  events, a growing "J: ... ▌" line for partials finalized by the reply,
-  status lines, and an in-room APPROVE/DENY confirmation banner (DOM
-  Overlay, visible in-headset). Replies are spoken as before; errors
-  are not.
-- Tests: portal round-trip now exercises the async turn - partials
-  stream, the final reply matches, page carries the event/confirm/
-  partial hooks. Board and models checks unchanged.
-- Version 3.12.0.
+- api.py: jarvis serve --api starts a loopback-only, token-authenticated
+  JSON API (127.0.0.1 hard-bound; the LAN Bridge stays a separate PRO
+  command). Endpoints: GET /health, GET /tools (tier-gated registry),
+  POST /chat (synchronous full agent turn; 409 when busy). Token lives
+  in <config>/api-token (0600 POSIX), rotatable via jarvis api token
+  rotate (shown once) / show (masked). LITE tier: same trust envelope
+  as the dashboard (loopback + token). Confirmation-gated tools are
+  auto-DENIED over the API - the model points the user at the dashboard
+  or Bridge for interactive approvals. Nothing is logged, least of all
+  the token. API turns are logged to the conversation store (parity).
+- overlay.py: jarvis overlay opens an always-on-top Tkinter companion
+  (status + query box + last reply) talking to the local API.
+  --attach <process> best-effort finds the process (psutil) and tags
+  sent messages with a context line - the overlay observes nothing by
+  itself. --clickthrough is display-only on Windows. Degrades to a
+  console companion without Tkinter; --no-ui runs headless (status
+  once, clean exit 0) for tests and scripting.
+- plugins.py: jarvis plugin scaffold vscode|browser --out <dir> writes
+  minimal starters that call the API (VS Code command + settings; MV3
+  manifest + service worker + popup). No auto-install, no store
+  publishing, no token embedded in generated files - tokens are
+  configured at runtime through each host's own storage.
+- Tests: API auth (missing/invalid/valid/rotated tokens), loopback bind
+  assertion, tier gating over /tools, chat round-trip, 409 busy,
+  overlay no-ui offline + online paths, scaffold file/manifest schema
+  and secret-free assertions.
+- Version 3.13.0.

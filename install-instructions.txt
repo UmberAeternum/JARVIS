@@ -71,6 +71,15 @@ EVERYDAY COMMANDS
   jarvis diagnostics bundle
                           redacted support bundle to attach to a support
                           request (no keys, no message bodies by default)
+  jarvis serve --api     local JSON API for other apps (loopback + token):
+                         GET /health, GET /tools, POST /chat
+  jarvis api token rotate | show
+                         rotate or inspect the API token (shown once on rotate)
+  jarvis overlay         always-on-top companion window beside other apps
+                         (--attach <process> adds context, --clickthrough
+                         makes it display-only)
+  jarvis plugin scaffold vscode|browser --out DIR
+                         generate starter extensions that call the local API
   jarvis license activate UMBRA-xxxx.yyyy
   jarvis license status
 
