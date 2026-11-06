@@ -501,7 +501,7 @@ def _dispatch(argv: list[str] | None = None) -> int:
             "  plugin      scaffold <vscode|browser> --out <dir> - app-injection starters\n"
             "  inject      scan | install | bundle - put UMBRA on another device\n"
             "  personality show | set - honorific, verbosity, humor, proactivity\n"
-            "  access      grant --full | status | log | revoke --all (EDITH protocol)\n"
+            "  access      grant --full | grant --tiers observe,assist,act,install | status | verify | log | revoke --all (EDITH protocol)\n"
             "  voice       show | set <default|jarvis> - TTS voice profile\n"
             "  hud         show | theme <hologram|minimal> - dashboard HUD look\n"
             "  intro       the 10-second boot sequence (--no-audio to skip speech)\n"
@@ -660,16 +660,52 @@ def _dispatch(argv: list[str] | None = None) -> int:
 
         sub = argv[1] if len(argv) > 1 else "status"
         if sub == "grant":
-            if "--full" not in argv[2:]:
-                console.print("usage: jarvis access grant --full")
-                return 1
-            console.print("[yellow]This grants UMBRA full reach: device installs,")
-            console.print("[yellow]cross-app attachment, and the API's tool endpoints.")
-            console.print(f"[yellow]The grant expires in {access.window_hours()}h and is logged.")
-            typed = console.input("[bold cyan]Type the confirmation phrase> [/]")
-            ok, message = access.grant_full(typed)
-            console.print(f"[{'green' if ok else 'red'}]{message}[/]")
-            return 0 if ok else 1
+            rest = argv[2:]
+            if "--full" in rest:
+                console.print("[yellow]This grants UMBRA full reach: device installs,")
+                console.print("[yellow]cross-app attachment, and the API's tool endpoints.")
+                console.print(f"[yellow]The grant expires in {access.window_hours()}h and is logged.")
+                typed = console.input("[bold cyan]Type the confirmation phrase> [/]")
+                ok, message = access.grant_full(typed)
+                console.print(f"[{'green' if ok else 'red'}]{message}[/]")
+                return 0 if ok else 1
+            if "--tiers" in rest:
+                index = rest.index("--tiers")
+                tiers_arg = rest[index + 1] if index + 1 < len(rest) else ""
+                tiers = [tier.strip() for tier in tiers_arg.split(",") if tier.strip()]
+                unknown = [tier for tier in tiers if tier not in access.TIERS]
+                if not tiers or unknown:
+                    if unknown:
+                        console.print(f"[red]unknown tier(s): {', '.join(unknown)}[/]")
+                    console.print(f"[dim]tiers, in rank order: {' < '.join(access.TIERS)}[/]")
+                    console.print("usage: jarvis access grant --tiers <t1,t2> [--window-hours N]")
+                    return 1
+                window_h = None
+                if "--window-hours" in rest:
+                    windex = rest.index("--window-hours")
+                    if windex + 1 >= len(rest):
+                        console.print("[red]--window-hours needs an integer[/]")
+                        return 1
+                    try:
+                        window_h = int(rest[windex + 1])
+                    except ValueError:
+                        console.print("[red]--window-hours needs an integer[/]")
+                        return 1
+                    if window_h < 1:
+                        console.print("[red]--window-hours must be at least 1[/]")
+                        return 1
+                console.print(f"[yellow]This grants exactly the tiers: {', '.join(tiers)}")
+                console.print(f"[yellow]The grant expires in {window_h or access.window_hours()}h and is logged.")
+                typed = console.input("[bold cyan]Type the confirmation phrase> [/]")
+                ok, message = access.grant_tiers(tiers, typed, window_h=window_h)
+                console.print(f"[{'green' if ok else 'red'}]{message}[/]")
+                return 0 if ok else 1
+            console.print("usage: jarvis access grant --full | --tiers <t1,t2> [--window-hours N]")
+            return 1
+        if sub == "verify":
+            # a report, not an enforcement gate: exit 0 either way
+            console.print("ledger integrity: " + ("OK" if access.verify_log() else "TAMPERED"))
+            return 0
         if sub == "status":
             console.print(access.status_text())
             return 0
@@ -689,7 +725,7 @@ def _dispatch(argv: list[str] | None = None) -> int:
                 return 1
             console.print("[green]" + access.revoke_all() + "[/]")
             return 0
-        console.print("usage: jarvis access grant --full | status | log | revoke --all")
+        console.print("usage: jarvis access grant --full | --tiers <t1,t2> | status | verify | log | revoke --all")
         return 1
     if argv and argv[0] == "voice":
         from .config import VoiceConfig

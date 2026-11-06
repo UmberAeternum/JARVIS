@@ -219,13 +219,15 @@ def run_install(console, os_name: str, target: str, apk: Path | None,
         console.print("Review it first with [bold]--dry-run[/], then add [bold]--yes[/] to execute.")
         return 1
 
-    # EDITH-protocol: real installs need FULL ACCESS + a per-target confirm
-    from .access import require_full
+    # EDITH-protocol Phase 1 spine: real installs go through the authorize
+    # chokepoint (install tier) + a per-target confirm
+    from . import access
 
-    if not require_full("inject install -> " + target):
+    allowed, reason = access.authorize("inject.install", target=target)
+    if not allowed:
         console.print(
-            "[red]Full access is not granted.[/] A device install needs it:\n"
-            "  [bold]jarvis access grant --full[/]  (interactive; expires in 24h)"
+            f"[red]{reason}[/]\n"
+            "Grant it interactively: [bold]jarvis access grant --full[/]"
         )
         return 1
     from rich.prompt import Confirm

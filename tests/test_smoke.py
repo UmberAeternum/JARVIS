@@ -106,7 +106,7 @@ class FakeBrain:
 
 
 def version_string() -> None:
-    expect(__version__ == "3.19.0", __version__)
+    expect(__version__ == "3.20.0", __version__)
 
 
 def registry_built() -> None:
@@ -2583,9 +2583,11 @@ def edith_protocol(tmp: Path) -> None:
     original = config.config_dir
     config.config_dir = lambda: tmp / "cfgedith"
     try:
-        # default deny on a fresh machine
+        # default deny on a fresh machine (per-tier status in rank order)
         expect(access.full_active() is False, "fresh machine must have zero reach")
-        expect(access.status_text().startswith("FULL ACCESS: not granted"), "status")
+        status = access.status_text()
+        expect(all(f"  {tier}: not granted" in status for tier in access.TIERS),
+               f"status must list every tier: {status}")
 
         # inject install: refuses without grant - no prompts, no network
         out = io.StringIO()
@@ -2593,7 +2595,7 @@ def edith_protocol(tmp: Path) -> None:
             Console(file=out, force_terminal=False), "linux", "umbra@192.168.1.50",
             apk=None, systemd=False, dry_run=False, yes=True, i_know=False,
         )
-        expect(code == 1 and "Full access is not granted" in out.getvalue(),
+        expect(code == 1 and "inject.install denied" in out.getvalue(),
                f"pre-grant install must refuse: {out.getvalue()}")
 
         # grant: wrong phrase refused, right phrase granted (interactive path)
@@ -2602,7 +2604,7 @@ def edith_protocol(tmp: Path) -> None:
         ok, message = access.grant_full(access.CONFIRMATION_PHRASE)
         expect(ok is True, message)
         expect(access.full_active() is True, "grant must be active")
-        expect("granted since" in access.status_text(), access.status_text())
+        expect("install: granted" in access.status_text(), access.status_text())
         # with grant: per-target confirmation (declined here - no network, no install)
         out2 = io.StringIO()
         from rich.prompt import Confirm
@@ -2670,7 +2672,7 @@ def edith_protocol(tmp: Path) -> None:
                          headers={"X-Jarvis-Token": token, "Content-Type": "application/json"})
             resp = conn.getresponse()
             denied = json.loads(resp.read().decode("utf-8"))
-            expect(resp.status == 403 and "full access" in denied.get("error", ""),
+            expect(resp.status == 403 and "api.chat denied" in denied.get("error", ""),
                    f"pre-grant /chat must refuse: {denied}")
             # grant via the API-independent path, then /chat works and is logged
             access.grant_full(access.CONFIRMATION_PHRASE)
@@ -2695,7 +2697,7 @@ def edith_protocol(tmp: Path) -> None:
 
         code3 = run_overlay(Console(file=out3, force_terminal=False),
                             attach_name="explorer", no_ui=True)
-        expect(code3 == 1 and "Full access is not granted" in out3.getvalue(),
+        expect(code3 == 1 and "overlay.attach denied" in out3.getvalue(),
                f"attach must refuse: {out3.getvalue()}")
 
         # hard prohibition: scan alone performs ZERO installs (ledger stays clean)
@@ -2723,6 +2725,67 @@ def edith_protocol(tmp: Path) -> None:
         expect(_barge_triggered([floor * 20] * 3), "speech must barge")
         expect(not _barge_triggered([floor * 20, floor * 0.5, floor * 20, floor * 0.5] * 2),
                "intermittent noise must not barge")
+    finally:
+        config.config_dir = original
+
+
+def spine_authorize(tmp: Path) -> None:
+    """Mark XXXI Phase 1 - the policy spine: authorize() is the chokepoint."""
+    from jarvis import access
+
+    original = config.config_dir
+    config.config_dir = lambda: tmp / "cfgspine"
+    try:
+        # default deny: fresh machine, nothing granted, unknown actions too
+        expect(access.authorize("api.chat")[0] is False, "api.chat must deny by default")
+        expect(access.authorize("inject.install")[0] is False,
+               "inject.install must deny by default")
+        expect(access.authorize("made.up.thing")[0] is False,
+               "unknown actions must default-deny at the install tier")
+
+        # tiered grant: assist unlocks api + overlay but NOT installs
+        ok, message = access.grant_tiers(["assist"], access.CONFIRMATION_PHRASE)
+        expect(ok is True, message)
+        expect(access.authorize("api.chat")[0] is True, "api.chat needs the assist tier")
+        expect(access.authorize("api.tools")[0] is True, "api.tools needs the assist tier")
+        expect(access.authorize("inject.install")[0] is False,
+               "the assist tier must NOT unlock inject.install")
+        expect(access.authorize("overlay.attach")[0] is True,
+               "overlay.attach needs the assist tier")
+
+        # legacy compat: grant_full = all tiers; full_active reports install
+        ok2, message2 = access.grant_full(access.CONFIRMATION_PHRASE)
+        expect(ok2 is True, message2)
+        expect(access.full_active() is True, "grant_full must activate full reach")
+        expect(access.authorize("inject.install")[0] is True,
+               "the full grant must unlock inject.install")
+
+        # per-tier expiry: assist expired, install still live
+        now = time.time()
+        state = {
+            "fingerprint": access.device_fingerprint(),
+            "grants": {
+                "assist": {"ts": now - 100, "expires_ts": now - 1},
+                "install": {"ts": now - 50, "expires_ts": now + 999},
+            },
+        }
+        access._save_state(state)
+        expect(access.authorize("api.chat")[0] is False, "an expired tier must deny")
+        expect(access.authorize("inject.install")[0] is True,
+               "a live install tier must allow even when assist expired")
+
+        # the ledger saw both outcomes and verifies
+        actions = [entry.get("action") for entry in access.log_entries()]
+        expect("reach_allowed" in actions and "reach_denied" in actions,
+               f"authorize must write the ledger both ways: {sorted(set(actions))}")
+        expect(access.verify_log() is True, "the ledger must verify")
+
+        # an unknown tier is refused before anything is granted
+        before = access._load_state()
+        ok3, message3 = access.grant_tiers(["assist", "bogus"], access.CONFIRMATION_PHRASE)
+        expect(ok3 is False and "bogus" in message3, message3)
+        expect(access._load_state() == before,
+               "a refused grant must leave the state untouched")
     finally:
         config.config_dir = original
 
@@ -2951,6 +3014,7 @@ def main() -> int:
     check("presence: wake + ambient + personality", lambda: presence_wake_ambient_personality(tmp_path))
     check("hud + voice profile + intro", lambda: hud_voice_intro(tmp_path))
     check("EDITH protocol", lambda: edith_protocol(tmp_path))
+    check("policy spine: authorize", lambda: spine_authorize(tmp_path))
     check("GA hardening", lambda: ga_hardening(tmp_path))
 
     check("BrainChain failover", chain_failover)

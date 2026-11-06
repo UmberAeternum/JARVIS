@@ -36,6 +36,23 @@ from . import config
 CONFIRMATION_PHRASE = "I grant UMBRA full access"
 DEFAULT_WINDOW_H = 24
 
+# Mark XXXI Phase 1 - the policy spine: tiered grants instead of one switch.
+# Every reach action maps to the LEAST tier that unlocks it; authorize() is
+# the single chokepoint all gates call.
+TIERS = ("observe", "assist", "act", "install")
+TIER_RANK = {"observe": 0, "assist": 1, "act": 2, "install": 3}
+
+# action -> required tier. Unknown actions map to "install" (default-deny
+# at the strongest tier - a forgotten gate cannot become a bypass).
+SCOPE_TIER = {
+    "access.status": "observe",
+    "api.health": "observe",
+    "api.tools": "assist",
+    "api.chat": "assist",
+    "overlay.attach": "assist",
+    "inject.install": "install",
+}
+
 
 class AccessConfig:
     """Grant window only - the grant itself can never come from config."""
@@ -61,11 +78,21 @@ def device_fingerprint() -> str:
 
 
 def _load_state() -> dict:
+    """Read the grant state, migrating the pre-spine single-'full' format."""
     try:
         data = json.loads(_state_path().read_text(encoding="utf-8"))
-        return data if isinstance(data, dict) else {}
     except (OSError, ValueError):
         return {}
+    if not isinstance(data, dict):
+        return {}
+    if data.get("full") and "grants" not in data:  # pre-spine format -> migrate
+        expires = float(data.get("expires_ts", 0))
+        data["grants"] = {
+            tier: {"ts": float(data.get("granted_ts", 0)), "expires_ts": expires}
+            for tier in TIERS
+        }
+        data["fingerprint"] = data.get("fingerprint", device_fingerprint())
+    return data
 
 
 def _save_state(state: dict) -> None:
@@ -79,16 +106,23 @@ def _save_state(state: dict) -> None:
             pass
 
 
-def full_active(now: float | None = None) -> bool:
-    """True only when a grant exists, is unexpired, and matches this machine."""
-    state = _load_state()
-    if not state.get("full"):
+def _tier_active(tier: str, state: dict, now: float) -> bool:
+    grant = (state.get("grants") or {}).get(tier)
+    if not isinstance(grant, dict):
         return False
     if state.get("fingerprint") != device_fingerprint():
         return False
+    try:
+        return now < float(grant.get("expires_ts", 0))
+    except (TypeError, ValueError):
+        return False
+
+
+def full_active(now: float | None = None) -> bool:
+    """Legacy surface: True when the strongest tier (install) is active -
+    under tiered grants that implies every lesser tier is active too."""
     now = time.time() if now is None else now
-    expires = float(state.get("expires_ts", 0))
-    return now < expires
+    return _tier_active("install", _load_state(), now)
 
 
 def window_hours() -> int:
@@ -103,54 +137,88 @@ def window_hours() -> int:
     return DEFAULT_WINDOW_H
 
 
-def grant_full(phrase_input: str) -> tuple[bool, str]:
-    """Create the full-access grant. Returns (ok, message). The phrase must
-    be typed by a human - callers pass whatever the user typed."""
+def grant_tiers(tiers: list[str], phrase_input: str,
+                window_h: int | None = None) -> tuple[bool, str]:
+    """Phase 1 spine: grant exactly the named tiers, each expiring on its own
+    window. The typed phrase is mandatory whatever the tier."""
+    for tier in tiers:
+        if tier not in TIERS:
+            return False, f"unknown tier: {tier}"
     typed = (phrase_input or "").strip()
     if typed != CONFIRMATION_PHRASE:
-        log_append("grant_denied", "confirmation phrase mismatch")
+        log_append("grant_denied", "confirmation phrase mismatch (tiers: "
+                   + ",".join(tiers) + ")")
         return False, "confirmation phrase did not match - grant NOT created."
-    state = {
-        "full": True,
-        "granted_ts": time.time(),
-        "expires_ts": time.time() + window_hours() * 3600,
-        "fingerprint": device_fingerprint(),
-    }
+    hours = window_h or window_hours()
+    now = time.time()
+    state = _load_state()
+    grants = state.get("grants") or {}
+    state["grants"] = grants
+    for tier in tiers:
+        grants[tier] = {"ts": now, "expires_ts": now + hours * 3600}
+    state["fingerprint"] = device_fingerprint()
     _save_state(state)
-    log_append("grant_full", f"full access granted, expires in {window_hours()}h")
-    return True, (
-        f"FULL ACCESS granted - expires in {window_hours()}h. "
-        "Every reach action is logged; revoke with jarvis access revoke --all."
-    )
+    log_append("grant", "tiers " + ",".join(tiers) + f", expires in {hours}h")
+    return True, f"Granted {', '.join(tiers)} - expires in {hours}h (ledger updated)."
+
+
+def grant_full(phrase_input: str) -> tuple[bool, str]:
+    """Legacy surface: grant ALL tiers - the rare case, kept for
+    compatibility with the pre-spine command."""
+    return grant_tiers(list(TIERS), phrase_input)
 
 
 def revoke_all() -> str:
-    _save_state({"full": False, "fingerprint": device_fingerprint()})
-    log_append("revoke_all", "full access revoked")
+    _save_state({"fingerprint": device_fingerprint()})
+    log_append("revoke_all", "all tier grants revoked")
     return "FULL ACCESS revoked - reach capabilities are denied again."
 
 
+def authorize(action: str, target: str = "") -> tuple[bool, str]:
+    """THE policy chokepoint (Phase 1). Every reach capability calls this -
+    no gate may check grants, expiry, or fingerprint on its own.
+
+    Checks the action's required tier against the tiered grants (expiry +
+    fingerprint), then writes the ledger entry either way. Returns
+    (allowed, reason)."""
+    tier = SCOPE_TIER.get(action, "install")  # unknown actions: strongest gate
+    state = _load_state()
+    now = time.time()
+    if _tier_active(tier, state, now):
+        log_append("reach_allowed", action + (f" -> {target}" if target else ""))
+        return True, f"{action} authorized (tier {tier})."
+    reason = f"{action} denied - tier '{tier}' not granted (or expired)."
+    log_append("reach_denied", reason + (f" -> {target}" if target else ""))
+    return False, reason
+
+
 def require_full(action: str) -> bool:
-    """The gate every reach capability calls first. Logs the attempt either
-    way; returns whether the action may proceed."""
-    if full_active():
-        log_append("reach_allowed", action)
-        return True
-    log_append("reach_denied", action)
-    return False
+    """Legacy gate surface (pre-spine call sites). Maps legacy action
+    strings to spine scopes and defers to authorize()."""
+    if action.startswith("inject install"):
+        action = "inject.install"
+    elif action.startswith("overlay --attach"):
+        action = "overlay.attach"
+    elif action.startswith("api"):
+        action = "api.chat"
+    allowed, _reason = authorize(action)
+    return allowed
 
 
 def status_text() -> str:
+    """Per-tier status, in rank order - every tier is always listed (an
+    empty/expired grant prints as "not granted")."""
     state = _load_state()
-    if not state.get("full"):
-        return "FULL ACCESS: not granted"
-    if state.get("fingerprint") != device_fingerprint():
-        return "FULL ACCESS: not granted (grant belongs to another machine)"
-    if time.time() >= float(state.get("expires_ts", 0)):
-        return "FULL ACCESS: not granted (expired - re-grant with jarvis access grant --full)"
-    since = time.strftime("%Y-%m-%d %H:%M", time.localtime(float(state["granted_ts"])))
-    expires = time.strftime("%Y-%m-%d %H:%M", time.localtime(float(state["expires_ts"])))
-    return f"FULL ACCESS: granted since {since}, expires {expires}"
+    grants = state.get("grants") or {}
+    lines = []
+    for tier in TIERS:
+        grant = grants.get(tier)
+        if grant and _tier_active(tier, state, time.time()):
+            expires = time.strftime("%Y-%m-%d %H:%M", time.localtime(float(grant["expires_ts"])))
+            lines.append(f"  {tier}: granted, expires {expires}")
+        else:
+            lines.append(f"  {tier}: not granted")
+    return "ACCESS TIERS:\n" + "\n".join(lines)
 
 
 # ------------------------------------------------------------------ ledger

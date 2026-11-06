@@ -185,10 +185,12 @@ def make_handler(state: ApiState) -> type:
                     "full_access": access_module.full_active(),
                 })
                 return
-            if not access_module.require_full("api GET " + path):
-                self._json(403, {"error": "full access required - jarvis access grant --full"})
-                return
             if path == "/tools":
+                # Phase 1 spine: the tool listing is an assist-tier capability
+                allowed, reason = access_module.authorize("api.tools")
+                if not allowed:
+                    self._json(403, {"error": reason})
+                    return
                 self._json(200, {"tools": state.registry.descriptions()})
                 return
             self._json(404, {"error": "not found"})
@@ -203,9 +205,6 @@ def make_handler(state: ApiState) -> type:
                 self._json(403, {"error": "forbidden - missing or invalid API token"})
                 return
             path = self.path.split("?")[0].rstrip("/") or "/"
-            if path != "/health" and not access_module.require_full("api POST " + path):
-                self._json(403, {"error": "full access required - jarvis access grant --full"})
-                return
             try:
                 payload = json.loads(raw.decode("utf-8"))
             except (ValueError, UnicodeDecodeError):
@@ -213,6 +212,11 @@ def make_handler(state: ApiState) -> type:
                 return
 
             if path == "/chat":
+                # Phase 1 spine: chat (and its tools) is an assist-tier capability
+                allowed, reason = access_module.authorize("api.chat")
+                if not allowed:
+                    self._json(403, {"error": reason})
+                    return
                 text = str(payload.get("text", "")).strip()
                 if not text:
                     self._json(400, {"error": "empty message"})
