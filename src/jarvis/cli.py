@@ -503,7 +503,7 @@ def _dispatch(argv: list[str] | None = None) -> int:
             "  plugin      scaffold <vscode|browser> --out <dir> - app-injection starters\n"
             "  inject      scan | install | bundle - put UMBRA on another device\n"
             "  doctor      check Python, config, brain, license, ledger - with fixes\n"
-            "  brain       status | route --explain \"<prompt>\" - the model router\n"
+            "  brain       status | route --explain \"<prompt>\" | budget - the model router\n"
             "  plan        \"<goal>\" [--dry-run] - plan a goal into gated steps\n"
             "  eval        run [--live] [--category X] | compare - the eval baseline\n"
             "  personality show | set - honorific, verbosity, humor, proactivity\n"
@@ -587,7 +587,8 @@ def _dispatch(argv: list[str] | None = None) -> int:
         return run_doctor(console)
     if argv and argv[0] == "brain":
         from .brain.manifest import load_manifests, manifests_dir
-        from .brain.router import RouterConfig, classify, is_sensitive, route
+        from .brain.router import (RouterConfig, classify, is_sensitive, route,
+                                   spent_today)
 
         sub = argv[1] if len(argv) > 1 else "status"
         cfg = config.Config.load() or config.Config()
@@ -628,7 +629,41 @@ def _dispatch(argv: list[str] | None = None) -> int:
                 return 1
             console.print(f"[green]route: {manifest['id']}[/] - {why}")
             return 0
-        console.print("usage: jarvis brain status | route --explain \"<prompt>\"")
+        if sub == "budget":
+            rest = argv[2:]
+            if "--set" in rest:
+                index = rest.index("--set")
+                setting = rest[index + 1] if index + 1 < len(rest) else ""
+                raw_value = rest[index + 2] if index + 2 < len(rest) else ""
+                fields = {"max-cost": "max_cost_per_request",
+                          "daily-budget": "daily_budget"}
+                if setting not in fields or not raw_value:
+                    console.print(
+                        "usage: jarvis brain budget --set max-cost <amount> "
+                        "| --set daily-budget <amount>")
+                    return 1
+                try:
+                    value = float(raw_value)
+                except ValueError:
+                    console.print("[red]the budget value must be a number[/]")
+                    return 1
+                if value < 0:
+                    console.print("[red]the budget value must not be negative[/]")
+                    return 1
+                setattr(cfg.router, fields[setting], value)
+                cfg.save()
+                console.print(f"[green]{fields[setting]} set to {value:g}[/]")
+            route_log = config.config_dir() / "route-log.jsonl"
+            spent = spent_today(route_log)
+            remaining = cfg.router.daily_budget - spent
+            console.print(
+                f"max cost per request: {cfg.router.max_cost_per_request:g}\n"
+                f"daily budget: {cfg.router.daily_budget:g}\n"
+                f"spent today: {spent:.4f}\n"
+                f"remaining today: {remaining:.4f}"
+                + ("  [red](over budget)[/]" if remaining < 0 else ""))
+            return 0
+        console.print("usage: jarvis brain status | route --explain \"<prompt>\" | budget")
         return 1
     if argv and argv[0] == "eval":
         from .evals import compare_results, load_scenarios, run_scenarios

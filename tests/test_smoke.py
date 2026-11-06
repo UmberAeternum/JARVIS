@@ -107,7 +107,7 @@ class FakeBrain:
 
 
 def version_string() -> None:
-    expect(__version__ == "3.27.0", __version__)
+    expect(__version__ == "3.28.0", __version__)
 
 
 class MockProvider(Provider):
@@ -176,7 +176,8 @@ def brain_v0_providers_gateway(tmp: Path) -> None:
 
     from jarvis import doctor
     from jarvis.brain import complete, make_brain_chain, classify_error
-    from jarvis.brain.manifest import validate_manifest, load_manifests
+    from jarvis.brain.manifest import BUILTIN_MANIFESTS, validate_manifest, load_manifests
+    from jarvis.brain.providers.anthropic import AnthropicProvider
     from jarvis.brain.providers.ollama import OllamaProvider
 
     # contract: the mock passes cleanly
@@ -207,6 +208,95 @@ def brain_v0_providers_gateway(tmp: Path) -> None:
     ok, errs = validate_manifest({"id": "x", "locality": "cloud",
                                   "privacy_class": "private_ok"})
     expect(not ok and any("cannot be private_ok" in e for e in errs), f"cloud/private_ok: {errs}")
+
+    # the Anthropic adapter: same Provider contract over stdlib http.client;
+    # the key comes from ANTHROPIC_API_KEY and travels in the x-api-key
+    # header only - never in the body, the path, or any error/detail text
+    anthropic_manifests = [m for m in BUILTIN_MANIFESTS
+                           if str(m.get("id", "")).startswith("anthropic/")]
+    expect(len(anthropic_manifests) == 1, "anthropic builtin manifest missing")
+    am = anthropic_manifests[0]
+    expect(am["locality"] == "cloud" and am["privacy_class"] == "redact_required",
+           f"anthropic manifest flags: {am}")
+
+    captured: dict = {}
+
+    def anthropic_transport(method, host, path, body, headers):
+        captured.update({"method": method, "host": host, "path": path,
+                         "body": body, "headers": headers})
+        if path.startswith("/v1/models"):
+            return 200, json.dumps({"data": []}).encode()
+        return 200, json.dumps({"content": [
+            {"type": "text", "text": "anthropic replied"},
+            {"type": "tool_use", "id": "tu_1", "name": "system_status",
+             "input": {"detail": True}},
+        ]}).encode()
+
+    saved_key = os.environ.get("ANTHROPIC_API_KEY")
+    os.environ["ANTHROPIC_API_KEY"] = FAKE_KEY
+    try:
+        provider = AnthropicProvider(transport=anthropic_transport)
+        chat = provider.chat(
+            [
+                {"role": "system", "content": "you are terse"},
+                {"role": "user", "content": "check the system"},
+                {"role": "assistant", "content": "", "tool_calls": [
+                    {"id": "call_1",
+                     "function": {"name": "system_status",
+                                  "arguments": "{\"detail\": true}"}}]},
+                {"role": "tool", "tool_call_id": "call_1", "content": "all nominal"},
+            ],
+            tools=[{"type": "function", "function": {
+                "name": "system_status", "description": "status",
+                "parameters": {"type": "object", "properties": {}}}}],
+        )
+        expect(chat["reply"] == "anthropic replied", f"anthropic reply: {chat}")
+        expect(chat["tool_calls"] and chat["tool_calls"][0]["name"] == "system_status"
+               and json.loads(chat["tool_calls"][0]["arguments"]) == {"detail": True},
+               f"anthropic tool call: {chat}")
+        body_data = json.loads(captured["body"].decode())
+        expect(body_data.get("system") == "you are terse", f"system lift: {body_data}")
+        expect(body_data["messages"][0] == {"role": "user", "content": "check the system"},
+               f"user mapping: {body_data['messages']}")
+        expect(body_data["messages"][1]["content"][0]["type"] == "tool_use"
+               and body_data["messages"][1]["content"][0]["name"] == "system_status"
+               and body_data["messages"][1]["content"][0]["input"] == {"detail": True},
+               f"assistant tool_use mapping: {body_data['messages'][1]}")
+        expect(body_data["messages"][2]["content"][0]["type"] == "tool_result"
+               and body_data["messages"][2]["content"][0]["content"] == "all nominal",
+               f"tool_result mapping: {body_data['messages'][2]}")
+        expect(body_data["tools"][0]["name"] == "system_status"
+               and body_data["tools"][0]["input_schema"]["type"] == "object",
+               f"tool schema unwrap: {body_data['tools']}")
+        expect(captured["headers"].get("x-api-key") == FAKE_KEY, "api key header")
+        expect(bool(captured["headers"].get("anthropic-version")), "api version header")
+        expect(FAKE_KEY not in captured["path"], "key must not leak into the path")
+        expect(FAKE_KEY not in captured["body"].decode(), "key must not leak into the body")
+        health = provider.health()
+        expect(health["ok"], f"anthropic health: {health}")
+        expect(FAKE_KEY not in health["detail"], "health detail must not echo the key")
+        expect(FAKE_KEY not in str(chat), "chat result must not echo the key")
+        result = run_provider_contract(provider)
+        expect(result["chat_ok"] and not result["violations"],
+               f"anthropic contract: {result}")
+    finally:
+        if saved_key is None:
+            os.environ.pop("ANTHROPIC_API_KEY", None)
+        else:
+            os.environ["ANTHROPIC_API_KEY"] = saved_key
+
+    # without a key the adapter refuses honestly - no network call, and the
+    # detail text never echoes a key value
+    dry = AnthropicProvider(transport=anthropic_transport)
+    dry_health = dry.health()
+    expect(not dry_health["ok"] and "not set" in dry_health["detail"],
+           f"keyless health: {dry_health}")
+    expect(FAKE_KEY not in dry_health["detail"], "keyless detail must not echo keys")
+    try:
+        dry.chat([{"role": "user", "content": "hi"}])
+        expect(False, "chat without a key must raise")
+    except RuntimeError as exc:
+        expect(FAKE_KEY not in str(exc), "error text must not echo the key")
 
     # error classification
     expect(classify_error(TimeoutError()) == "timeout", "timeout class")
@@ -333,6 +423,60 @@ def brain_router_v1(tmp: Path) -> None:
     logged = log_path.read_text(encoding="utf-8")
     expect("private sentence" not in logged, "route log must not contain prompt text")
     expect("model" in logged and "est_cost" in logged, "route log metadata missing")
+
+    # CLI: jarvis brain budget shows and sets the router budgets
+    import contextlib
+    import io
+
+    import jarvis.cli as cli_module
+
+    saved_cfg_dir = config.config_dir
+    try:
+        config.config_dir = lambda: tmp / "cfgbudget"
+        budget_log = tmp / "cfgbudget" / "route-log.jsonl"
+        budget_log.parent.mkdir(parents=True, exist_ok=True)
+        budget_log.write_text(jsonlib.dumps({
+            "ts": time.strftime("%Y-%m-%dT%H:%M:%S"),
+            "model": "anthropic/claude-sonnet-4-5",
+            "est_cost": 0.25,
+        }) + "\n", encoding="utf-8")
+        buffer = io.StringIO()
+        with contextlib.redirect_stdout(buffer):
+            code = cli_module._dispatch(["brain", "budget"])
+        expect(code == 0, "budget show must exit 0")
+        shown = buffer.getvalue()
+        expect("max cost per request" in shown and "daily budget" in shown
+               and "spent today" in shown, f"budget show fields: {shown[:300]!r}")
+        expect("0.25" in shown, "budget must report today's spend from the route log")
+
+        buffer = io.StringIO()
+        with contextlib.redirect_stdout(buffer):
+            code = cli_module._dispatch(["brain", "budget", "--set",
+                                         "daily-budget", "1.25"])
+        expect(code == 0, "budget --set daily-budget must exit 0")
+        loaded = config.Config.load()
+        expect(loaded is not None and loaded.router.daily_budget == 1.25,
+               "set daily-budget did not persist")
+
+        buffer = io.StringIO()
+        with contextlib.redirect_stdout(buffer):
+            code = cli_module._dispatch(["brain", "budget", "--set",
+                                         "max-cost", "0.10"])
+        expect(code == 0, "budget --set max-cost must exit 0")
+        loaded = config.Config.load()
+        expect(loaded is not None and loaded.router.max_cost_per_request == 0.10,
+               "set max-cost did not persist")
+
+        buffer = io.StringIO()
+        with contextlib.redirect_stdout(buffer):
+            code = cli_module._dispatch(["brain", "budget", "--set",
+                                         "daily-budget", "banana"])
+        expect(code == 1, "a non-numeric budget value must be refused")
+        loaded = config.Config.load()
+        expect(loaded is not None and loaded.router.daily_budget == 1.25,
+               "a refused set must not corrupt the saved budget")
+    finally:
+        config.config_dir = saved_cfg_dir
 
 
 def registry_built() -> None:
@@ -3457,16 +3601,16 @@ def eval_baseline(tmp: Path) -> None:
 
     scenarios_dir = Path(__file__).resolve().parent / "evals" / "scenarios"
     scenarios = load_scenarios(scenarios_dir)
-    expect(len(scenarios) == 25, f"expected 25 scenarios, got {len(scenarios)}")
+    expect(len(scenarios) == 31, f"expected 31 scenarios, got {len(scenarios)}")
     categories = {s.get("category") for s in scenarios}
     expect(categories == {"tool_calling", "gate_enforcement", "destructive",
-                          "memory", "prompt_injection", "persona"},
+                          "memory", "prompt_injection", "persona", "routing"},
            f"category coverage: {categories}")
 
     # offline run: every scenario executes in an isolated config dir
     with tempfile.TemporaryDirectory() as td:
         results = run_scenarios(scenarios, Path(td))
-    expect(results["total"] == 25, f"total: {results['total']}")
+    expect(results["total"] == 31, f"total: {results['total']}")
 
     # known failures are recorded honestly with reasons
     known = [r for r in results["results"] if not r["passed"] and r["known_failure"]]
@@ -3504,9 +3648,27 @@ def eval_baseline(tmp: Path) -> None:
 
     write_baseline(baseline_path, results)
     loaded = json.loads(baseline_path.read_text(encoding="utf-8"))
-    expect(len(loaded.get("results", [])) == 25, "baseline file incomplete")
+    expect(len(loaded.get("results", [])) == 31, "baseline file incomplete")
     report2 = compare_results(loaded, loaded)
     expect(not report2["regressions"], "self-compare must have no regressions")
+
+
+def routing_evals(tmp: Path) -> None:
+    """Phase 2 finish - six routing invariants run through the eval harness
+    (route() called directly): clean text routes local, private text pins
+    local, cloud opt-in gate, vision filtering, budget exhaustion keeps
+    local, and unknown intent falls back to chat."""
+    from jarvis.evals import load_scenarios, run_scenarios
+
+    scenarios_dir = Path(__file__).resolve().parent / "evals" / "scenarios"
+    scenarios = load_scenarios(scenarios_dir, "routing")
+    expect(len(scenarios) == 6, f"expected 6 routing scenarios, got {len(scenarios)}")
+    with tempfile.TemporaryDirectory() as td:
+        results = run_scenarios(scenarios, Path(td))
+    expect(results["total"] == 6, f"routing total: {results['total']}")
+    failed = [r for r in results["results"] if not r["passed"]]
+    expect(not failed, "routing invariants failed: "
+           + str([(r["id"], r["failures"]) for r in failed]))
 
 
 def cascade_planner(tmp: Path) -> None:
@@ -3852,6 +4014,7 @@ def main() -> int:
     check("brain v1: privacy router", lambda: brain_router_v1(tmp_path))
     check("spine bypass attempts", lambda: spine_bypass_attempts(tmp_path))
     check("eval baseline", lambda: eval_baseline(tmp_path))
+    check("routing evals", lambda: routing_evals(tmp_path))
     check("brain v2/v3: cascade + planner", lambda: cascade_planner(tmp_path))
     check("planner CLI: dry-run makes zero tool calls", lambda: planner_dry_run(tmp_path))
 

@@ -36,6 +36,7 @@ CATEGORIES = (
     "memory",
     "prompt_injection",
     "persona",
+    "routing",
 )
 
 
@@ -188,7 +189,65 @@ def _eval_check(check: dict, ctx: dict) -> tuple[bool, str]:
             return False, "no tool results were delivered"
         return (any(needle.lower() in content.lower() for content in results),
                 "needle missing from the tool-result channel")
+    # routing checks - the ctx comes from the router's route() function
+    if ctype == "route_ok":
+        return (ctx.get("route") is not None,
+                f"no route selected: {ctx.get('route_reason', '')}")
+    if ctype == "route_failed":
+        return (ctx.get("route") is None,
+                "a route was selected when none was expected")
+    if ctype == "route_model":
+        picked = ctx.get("route") or {}
+        return (picked.get("id") == check.get("value"),
+                f"routed to {picked.get('id')!r}, expected {check.get('value')!r}")
+    if ctype == "route_locality":
+        picked = ctx.get("route") or {}
+        return (picked.get("locality") == check.get("value"),
+                f"route locality {picked.get('locality')!r}, "
+                f"expected {check.get('value')!r}")
+    if ctype == "route_privacy":
+        picked = ctx.get("route") or {}
+        return (picked.get("privacy_class") == check.get("value"),
+                f"route privacy {picked.get('privacy_class')!r}, "
+                f"expected {check.get('value')!r}")
+    if ctype == "route_intent":
+        return (ctx.get("route_intent") == check.get("value"),
+                f"intent {ctx.get('route_intent')!r}, expected {check.get('value')!r}")
+    if ctype == "route_reason_contains":
+        needle = str(check.get("text", "")).lower()
+        return (needle in str(ctx.get("route_reason", "")).lower(),
+                f"route reason missing {check.get('text')!r}")
     return False, f"unknown check type: {ctype!r}"
+
+
+def _routing_ctx(scenario: dict, cfg_dir: Path, setup: dict) -> dict:
+    """Routing scenarios call the router's route() function directly (no
+    agent, no model) and expose the decision as route metadata for the
+    route_* checks. Manifests come from the setup (isolated fixtures) or
+    the builtin set; spend_today seeds the route log so budget rules can
+    be exercised deterministically."""
+    from .brain.manifest import BUILTIN_MANIFESTS
+    from .brain.router import RouterConfig, classify, route
+
+    route_log = cfg_dir / "route-log.jsonl"
+    spend = setup.get("spend_today")
+    if spend:
+        route_log.parent.mkdir(parents=True, exist_ok=True)
+        route_log.write_text(json.dumps({
+            "ts": time.strftime("%Y-%m-%dT%H:%M:%S"),
+            "model": "seed/spend",
+            "est_cost": float(spend),
+        }) + "\n", encoding="utf-8")
+    manifests = setup.get("manifests") or BUILTIN_MANIFESTS
+    router_cfg = RouterConfig.from_dict(setup.get("router"))
+    request = {"text": str(scenario.get("input", "")),
+               **(setup.get("request") or {})}
+    manifest, why = route(request, manifests, router_cfg, route_log)
+    return {
+        "route": manifest,
+        "route_reason": why,
+        "route_intent": classify(str(request.get("text", ""))),
+    }
 
 
 def run_scenario(scenario: dict, root: Path) -> dict:
@@ -229,20 +288,32 @@ def run_scenario(scenario: dict, root: Path) -> dict:
             allow_screen_control=bool(setup.get("screen_control", False)),
             allow_watchtower=bool(setup.get("watchtower", False)),
         )
-        model = ScriptedModel(scenario.get("script", []))
-        agent = Agent(model, registry)
         started = time.time()
-        reply = agent.run_turn(str(scenario.get("input", "")))
+        if scenario.get("category") == "routing" or setup.get("mode") == "routing":
+            # routing scenarios bypass the agent loop entirely: the router
+            # decides, and the checks assert the route metadata.
+            ctx = {
+                "tool_calls": [],
+                "tool_results": [],
+                "reply": "",
+                "confirm_log": confirm_log,
+                "tools_list": "",
+                "system_prompt": "",
+                **_routing_ctx(scenario, cfg_dir, setup),
+            }
+        else:
+            model = ScriptedModel(scenario.get("script", []))
+            agent = Agent(model, registry)
+            reply = agent.run_turn(str(scenario.get("input", "")))
+            ctx = {
+                "tool_calls": _tool_calls_in(agent.messages),
+                "tool_results": _tool_results_in(agent.messages),
+                "reply": reply or "",
+                "confirm_log": confirm_log,
+                "tools_list": registry.descriptions(),
+                "system_prompt": agent.messages[0].get("content", "") if agent.messages else "",
+            }
         latency_ms = int((time.time() - started) * 1000)
-
-        ctx = {
-            "tool_calls": _tool_calls_in(agent.messages),
-            "tool_results": _tool_results_in(agent.messages),
-            "reply": reply or "",
-            "confirm_log": confirm_log,
-            "tools_list": registry.descriptions(),
-            "system_prompt": agent.messages[0].get("content", "") if agent.messages else "",
-        }
         failures = []
         for check in scenario.get("checks", []):
             ok, detail = _eval_check(check, ctx)

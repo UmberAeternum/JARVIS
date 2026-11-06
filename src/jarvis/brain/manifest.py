@@ -61,6 +61,18 @@ BUILTIN_MANIFESTS: list[dict] = [
         "strengths": ["chat", "summaries"],
         "privacy_class": "redact_required",
     },
+    {
+        "id": "anthropic/claude-sonnet-4-5",
+        "locality": "cloud",
+        "context_tokens": 200000,
+        "tools": True,
+        "vision": False,
+        "cost_per_1k_in": 0.003,
+        "cost_per_1k_out": 0.015,
+        "p50_latency_ms": 1200,
+        "strengths": ["chat", "summaries"],
+        "privacy_class": "redact_required",
+    },
 ]
 
 

@@ -1,8 +1,10 @@
-Phase 9: accessibility + performance budget + release prep
+Phase 2 finish: Anthropic adapter, brain budget, routing evals
 
-- dashboard_page.py: aria-labels on interactive elements, role=log on
-  the chat log, role=navigation on tabs, role=status on vitals,
-  aria-selected on tab buttons, prefers-reduced-motion media query.
-- SUPPORT.md: performance budget section (cold start < 3 s, first token
-  < 2 s local, dashboard < 1 s, eval < 30 s).
-- Version 3.27.0.
+- brain/providers/anthropic.py: stdlib http.client adapter implementing
+  the Provider interface; reads ANTHROPIC_API_KEY from the environment;
+  keys never logged. Builtin manifest added (redact_required, cloud).
+- jarvis brain budget: shows and sets router budget limits.
+- 6 routing eval scenarios: clean-text-to-local, private-pins-local,
+  cloud-opt-in gate, vision filtering, budget exhaustion, unknown-intent
+  fallback.
+- Version 3.28.0.

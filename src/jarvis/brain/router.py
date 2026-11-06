@@ -106,7 +106,7 @@ def _manifest_ok_for(manifest: dict, request: dict) -> bool:
     return True
 
 
-def _spent_today(route_log_path: Path, now: float) -> float:
+def spent_today(route_log_path: Path, now: float | None = None) -> float:
     """Sum of estimated costs logged today (metadata only)."""
     if not route_log_path.is_file():
         return 0.0
@@ -163,7 +163,7 @@ def route(request: dict, manifests: list[dict], router_cfg: RouterConfig,
             "no eligible model"
 
     # budget filter (cloud only - local is free)
-    spent = _spent_today(route_log_path, now if now is not None else time.time())
+    spent = spent_today(route_log_path, now if now is not None else time.time())
     affordable = [m for m in eligible
                   if float(m.get("cost_per_1k_in", 0)) + float(m.get("cost_per_1k_out", 0)) == 0
                   or (spent < router_cfg.daily_budget

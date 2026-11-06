@@ -1,0 +1,98 @@
+[
+  {
+    "id": "route-001",
+    "category": "routing",
+    "title": "Clean text routes to the cheapest eligible model (local)",
+    "input": "what is the speed of light",
+    "setup": {"router": {"cloud_providers": ["openai-compat", "anthropic"]}},
+    "checks": [
+      {"type": "route_ok"},
+      {"type": "route_locality", "value": "local"},
+      {"type": "route_model", "value": "ollama/qwen2.5:7b"}
+    ]
+  },
+  {
+    "id": "route-002",
+    "category": "routing",
+    "title": "Private text never routes to a cloud model",
+    "input": "my notes are at C:\\Users\\me\\secret.txt, keep them local",
+    "setup": {"router": {"cloud_providers": ["openai-compat", "anthropic"]}},
+    "checks": [
+      {"type": "route_ok"},
+      {"type": "route_locality", "value": "local"},
+      {"type": "route_privacy", "value": "private_ok"}
+    ]
+  },
+  {
+    "id": "route-003",
+    "category": "routing",
+    "title": "Cloud not opted in means the local route wins",
+    "input": "tell me about the moon landing",
+    "setup": {"router": {"cloud_providers": []}},
+    "checks": [
+      {"type": "route_ok"},
+      {"type": "route_locality", "value": "local"}
+    ]
+  },
+  {
+    "id": "route-004",
+    "category": "routing",
+    "title": "A vision requirement filters out non-vision candidates",
+    "input": "what is in this image",
+    "setup": {
+      "request": {"vision": true},
+      "manifests": [
+        {"id": "test/local-chat", "locality": "local", "context_tokens": 32768,
+         "tools": true, "vision": false, "cost_per_1k_in": 0.0,
+         "cost_per_1k_out": 0.0, "p50_latency_ms": 900,
+         "strengths": ["chat"], "privacy_class": "private_ok"},
+        {"id": "test/local-vision", "locality": "local", "context_tokens": 32768,
+         "tools": true, "vision": true, "cost_per_1k_in": 0.0,
+         "cost_per_1k_out": 0.0, "p50_latency_ms": 1200,
+         "strengths": ["chat", "vision"], "privacy_class": "private_ok"}
+      ]
+    },
+    "checks": [
+      {"type": "route_ok"},
+      {"type": "route_model", "value": "test/local-vision"}
+    ]
+  },
+  {
+    "id": "route-005",
+    "category": "routing",
+    "title": "Budget exhaustion keeps the free local route",
+    "input": "plain chat, nothing private",
+    "setup": {
+      "router": {"cloud_providers": ["test"], "max_cost_per_request": 0.05,
+                 "daily_budget": 0.50},
+      "spend_today": 9.99,
+      "manifests": [
+        {"id": "test/local-free", "locality": "local", "context_tokens": 32768,
+         "tools": true, "vision": false, "cost_per_1k_in": 0.0,
+         "cost_per_1k_out": 0.0, "p50_latency_ms": 900,
+         "strengths": ["chat"], "privacy_class": "private_ok"},
+        {"id": "test/cloud-paid", "locality": "cloud", "context_tokens": 32768,
+         "tools": true, "vision": false, "cost_per_1k_in": 0.01,
+         "cost_per_1k_out": 0.03, "p50_latency_ms": 1200,
+         "strengths": ["chat"], "privacy_class": "redact_required"}
+      ]
+    },
+    "checks": [
+      {"type": "route_ok"},
+      {"type": "route_locality", "value": "local"},
+      {"type": "route_model", "value": "test/local-free"}
+    ]
+  },
+  {
+    "id": "route-006",
+    "category": "routing",
+    "title": "Unknown intent falls back to chat routing",
+    "input": "frobnicate the wibbly wobbly widgets",
+    "setup": {"router": {"cloud_providers": ["anthropic"]}},
+    "checks": [
+      {"type": "route_ok"},
+      {"type": "route_intent", "value": "chat"},
+      {"type": "route_model", "value": "ollama/qwen2.5:7b"}
+    ]
+  }
+]
