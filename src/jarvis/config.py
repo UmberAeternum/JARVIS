@@ -198,6 +198,16 @@ class AccessConfig:
 
 
 @dataclass
+class RouterConfig:
+    """Brain v1: the privacy router. Cloud providers are opt-in per
+    provider; the budgets are hard stops, not advisories."""
+
+    cloud_providers: list[str] = field(default_factory=list)  # opted-in provider ids
+    max_cost_per_request: float = 0.05
+    daily_budget: float = 0.50
+
+
+@dataclass
 class AmbientConfig:
     """Mark XXVIII: proactive nudges. Strictly opt-in, rate-limited, quiet
     hours respected; per-signal toggles (battery/reminders/health)."""
@@ -225,6 +235,7 @@ class Config:
     ambient: AmbientConfig = field(default_factory=AmbientConfig)
     hud: HudConfig = field(default_factory=HudConfig)
     access: AccessConfig = field(default_factory=AccessConfig)
+    router: RouterConfig = field(default_factory=RouterConfig)
     created_at: str = ""
     updated_at: str = ""
 
@@ -298,6 +309,11 @@ class Config:
             },
             "access": {
                 "window_hours": self.access.window_hours,
+            },
+            "router": {
+                "cloud_providers": self.router.cloud_providers,
+                "max_cost_per_request": self.router.max_cost_per_request,
+                "daily_budget": self.router.daily_budget,
             },
             "created_at": self.created_at,
             "updated_at": self.updated_at,
@@ -390,6 +406,16 @@ class Config:
         return AccessConfig(**{k: v for k, v in (raw or {}).items() if k in known})
 
     @classmethod
+    def _router_from(cls, raw: dict | None) -> RouterConfig:
+        known = {f.name for f in fields(RouterConfig)}
+        cloud = raw.get("cloud_providers") if raw else None
+        values = {k: v for k, v in (raw or {}).items() if k in known and k != "cloud_providers"}
+        cfg = RouterConfig(**values)
+        if isinstance(cloud, list):
+            cfg.cloud_providers = [str(item) for item in cloud]
+        return cfg
+
+    @classmethod
     def _from_modern(cls, raw: dict) -> "Config":
         """v2/v3/v4 share every key except voice and vision (defaults fill in)."""
         use_keyring = bool(raw.get("use_keyring", False))
@@ -406,6 +432,7 @@ class Config:
             ambient=cls._ambient_from(raw.get("ambient")),
             hud=cls._hud_from(raw.get("hud")),
             access=cls._access_from(raw.get("access")),
+            router=cls._router_from(raw.get("router")),
             created_at=raw.get("created_at", ""),
             updated_at=raw.get("updated_at", ""),
         )

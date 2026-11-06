@@ -1,4 +1,4 @@
-"""Provider-agnostic LLM clients - JARVIS's brain.
+"""Provider-agnostic LLM clients - JARVIS's brain (now the Brain package).
 
 Every supported brain speaks the OpenAI-compatible chat-completions API, so a
 single client covers cloud providers and local servers alike. On top of a
@@ -10,17 +10,23 @@ URL policy: all outbound HTTP goes through safety.guarded_fetch_json, which
 enforces the SSRF rule (http/https only, host + resolved-IP boundary checks,
 no redirects). Local brain endpoints are the explicit, sanctioned exception
 (allow_local=True); no model-influenced URL ever reaches a fetch.
+
+Brain v0 (the router era): this package now also hosts the provider
+abstraction (providers/), capability manifests (manifest.py), the single
+gateway complete(), and error classification - see the submodules. The
+legacy names below are unchanged; every existing import keeps working.
 """
 
 from __future__ import annotations
 
 import os
+import socket
 import types
 from dataclasses import dataclass
 from typing import Callable
 
-from . import safety
-from .config import BrainConfig
+from .. import safety  # jarvis.safety - one level up from the brain package
+from ..config import BrainConfig
 
 check_url = safety.check_url  # single URL validator for the whole project
 
@@ -138,6 +144,29 @@ def _is_transient(exc: Exception) -> bool:
     return False
 
 
+def classify_error(exc: Exception) -> str:
+    """Brain v0: error classification for the fallback chain - one name per
+    failure family, so routing decisions can be made on the class."""
+    if isinstance(exc, (TimeoutError, socket.timeout)):
+        return "timeout"
+    try:
+        from openai import APIConnectionError, APIStatusError, AuthenticationError
+
+        if isinstance(exc, AuthenticationError):
+            return "auth"
+        if isinstance(exc, APIConnectionError):
+            return "connection"
+        if isinstance(exc, APIStatusError):
+            code = getattr(exc, "status_code", None)
+            if code == 429:
+                return "rate_limit"
+            if code in (500, 502, 503, 504):
+                return "server"
+    except ImportError:
+        pass
+    return "unknown"
+
+
 class BrainChain:
     """Primary brain with an optional fallback; failover is sticky per session."""
 
@@ -243,7 +272,7 @@ class _StreamedToolCall:
     def model_dump(self) -> dict:
         return {
             "id": self.id,
-            "function": {"name": self.function.name, "arguments": self.function.arguments},
+            "function": {"name": self.function.name, "arguments": self.arguments},
         }
 
 
@@ -307,3 +336,39 @@ def discover_local_servers() -> list[dict]:
             }
         )
     return found
+
+
+# ------------------------------------------------------- gateway (Brain v0)
+
+
+def complete(request: dict, cfg=None, on_status: Callable[[str], None] | None = None) -> dict:
+    """The single gateway (Brain v0): one internal entry every UMBRA surface
+    can call. Behavior-preserving by construction - it drives the same
+    BrainChain machinery the surfaces use today.
+
+    request: {"text": "..."} or {"messages": [...]} plus optional "tools".
+    Returns {"reply": str, "route": {...}} - the route block records which
+    brain answered and whether failover fired (metadata only, no prompt).
+    """
+    cfg = cfg or config.Config.load() or config.Config()
+    chain = make_brain_chain(cfg, on_status=on_status)
+    if "messages" in request:
+        messages = request["messages"]
+    else:
+        messages = [{"role": "user", "content": str(request.get("text", ""))}]
+    tools = request.get("tools")
+    response = chain.create_chat(messages=messages, tools=tools)
+    reply = (response.choices[0].message.content or "").strip()
+    return {
+        "reply": reply,
+        "route": {
+            "model": chain.active.model,
+            "base_url": chain.active.base_url,
+            "fallback_active": chain.active is not chain.primary,
+            "provider": "brain-chain",
+        },
+    }
+
+
+# re-export the config shim some legacy callers relied on via brain.Config
+from .. import config as config  # noqa: E402,F401 - re-export for compatibility

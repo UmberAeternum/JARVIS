@@ -500,6 +500,8 @@ def _dispatch(argv: list[str] | None = None) -> int:
             "  overlay     always-on-top companion beside your other apps\n"
             "  plugin      scaffold <vscode|browser> --out <dir> - app-injection starters\n"
             "  inject      scan | install | bundle - put UMBRA on another device\n"
+            "  doctor      check Python, config, brain, license, ledger - with fixes\n"
+            "  brain       status | route --explain \"<prompt>\" - the model router\n"
             "  personality show | set - honorific, verbosity, humor, proactivity\n"
             "  access      grant --full | grant --tiers observe,assist,act,install | status | verify | log | revoke --all (EDITH protocol)\n"
             "  voice       show | set <default|jarvis> - TTS voice profile\n"
@@ -564,6 +566,55 @@ def _dispatch(argv: list[str] | None = None) -> int:
             )
             return 1
         return run_portal(console)
+    if argv and argv[0] == "doctor":
+        from .doctor import run_doctor
+
+        return run_doctor(console)
+    if argv and argv[0] == "brain":
+        from .brain.manifest import load_manifests, manifests_dir
+        from .brain.router import RouterConfig, classify, is_sensitive, route
+
+        sub = argv[1] if len(argv) > 1 else "status"
+        cfg = config.Config.load() or config.Config()
+        router_cfg = cfg.router
+        manifests, manifest_errors = load_manifests(manifests_dir())
+        if sub == "status":
+            console.print(f"manifests loaded: {len(manifests)}"
+                          + (f" ({len(manifest_errors)} invalid skipped)" if manifest_errors else ""))
+            for error in manifest_errors:
+                console.print(f"  [red]{error}[/]")
+            for manifest in manifests:
+                console.print(
+                    f"  {manifest['id']}  [{manifest['locality']}] "
+                    f"tools={manifest['tools']} vision={manifest['vision']} "
+                    f"ctx={manifest['context_tokens']} "
+                    f"privacy={manifest['privacy_class']}"
+                )
+            console.print(
+                f"router: cloud opted-in={router_cfg.cloud_providers or '(none)'} · "
+                f"max/request={router_cfg.max_cost_per_request} · "
+                f"daily budget={router_cfg.daily_budget}"
+            )
+            return 0
+        if sub == "route":
+            marker = "--explain"
+            if marker not in argv[2:]:
+                console.print("usage: jarvis brain route --explain \"<prompt>\"")
+                return 1
+            index = argv[2:].index(marker)
+            prompt_text = " ".join(argv[3:][index:]) if index + 1 < len(argv[2:]) else ""
+            prompt_text = " ".join(argv[2:][index + 1:])
+            manifest, why = route({"text": prompt_text}, manifests, router_cfg,
+                                  config.config_dir() / "route-log.jsonl")
+            console.print(f"sensitivity: {'PRIVATE DATA' if is_sensitive(prompt_text) else 'clean'}")
+            console.print(f"classification: {classify(prompt_text)}")
+            if manifest is None:
+                console.print(f"[yellow]route: {why}[/]")
+                return 1
+            console.print(f"[green]route: {manifest['id']}[/] - {why}")
+            return 0
+        console.print("usage: jarvis brain status | route --explain \"<prompt>\"")
+        return 1
     if argv and argv[0] == "serve":
         if "--api" in argv[1:]:
             # Mark XXVI: the embeddable local API - loopback + token, the same

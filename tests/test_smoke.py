@@ -28,6 +28,7 @@ from jarvis import __version__  # noqa: E402
 from jarvis import config, safety  # noqa: E402
 from jarvis.agent import HISTORY_LIMIT, Agent  # noqa: E402
 from jarvis.brain import Brain, BrainChain, is_chat_model  # noqa: E402
+from jarvis.brain.providers.base import Provider  # noqa: E402
 from jarvis.tools import default_registry  # noqa: E402
 
 results: list[tuple[bool, str, str]] = []
@@ -106,7 +107,232 @@ class FakeBrain:
 
 
 def version_string() -> None:
-    expect(__version__ == "3.20.0", __version__)
+    expect(__version__ == "3.21.0", __version__)
+
+
+class MockProvider(Provider):
+    """Brain v0 - contract-test mock: no network, deterministic replies.
+    Subclasses Provider so capabilities() composes the accessors like every
+    real adapter must."""
+
+    name = "mock"
+
+    def __init__(self, reply: str = "mock reply", fail: bool = False):
+        self.reply = reply
+        self.fail = fail
+
+    def chat(self, messages: list[dict], tools: list[dict] | None = None) -> dict:
+        if self.fail:
+            raise ConnectionError("mock connection failure")
+        return {"reply": self.reply, "tool_calls": None}
+
+    def tools(self) -> list[str]:
+        return ["mock_tool"]
+
+    def vision(self) -> bool:
+        return False
+
+    def embed(self, text: str) -> list[float] | None:
+        return [0.0, 1.0]
+
+    def health(self) -> dict:
+        return {"ok": not self.fail, "detail": "mock"}
+
+
+def run_provider_contract(provider) -> dict:
+    """Contract runner shared by all Brain v0 adapter tests."""
+    violations: list[str] = []
+    result: dict = {"name": provider.name}
+    try:
+        chat = provider.chat([{"role": "user", "content": "contract probe"}])
+        result["chat_ok"] = isinstance(chat, dict) and isinstance(chat.get("reply"), str)
+        if not result["chat_ok"]:
+            violations.append("chat must return a dict with the reply text")
+    except Exception as exc:
+        result["chat_ok"] = False
+        violations.append(f"chat raised: {type(exc).__name__}: {exc}")
+    try:
+        caps = provider.capabilities()
+        for key in ("name", "tools", "vision", "embed", "health_ok"):
+            if key not in caps:
+                violations.append(f"capabilities missing {key}")
+    except Exception as exc:
+        violations.append(f"capabilities raised: {type(exc).__name__}: {exc}")
+    try:
+        health = provider.health()
+        result["health_ok"] = isinstance(health, dict) and "ok" in health
+    except Exception as exc:
+        result["health_ok"] = False
+        violations.append(f"health raised: {type(exc).__name__}: {exc}")
+    result["violations"] = violations
+    return result
+
+
+def brain_v0_providers_gateway(tmp: Path) -> None:
+    """Brain v0 - provider contract, manifests, gateway fallback, doctor."""
+    import io
+
+    from rich.console import Console
+
+    from jarvis import doctor
+    from jarvis.brain import complete, make_brain_chain, classify_error
+    from jarvis.brain.manifest import validate_manifest, load_manifests
+    from jarvis.brain.providers.ollama import OllamaProvider
+
+    # contract: the mock passes cleanly
+    result = run_provider_contract(MockProvider())
+    expect(result["chat_ok"] and not result["violations"], f"mock contract: {result}")
+
+    # contract: the Ollama adapter passes with mocked HTTP transport
+    def fake_transport(method, host, port, path, body):
+        if path == "/api/chat":
+            body_data = json.loads(body.decode("utf-8"))
+            return 200, json.dumps(
+                {"message": {"content": "ollama replied to "
+                            + body_data["messages"][-1]["content"]}}).encode()
+        if path == "/api/tags":
+            return 200, json.dumps({"models": [{"name": "qwen2.5:7b"}]}).encode()
+        if path == "/api/embeddings":
+            return 200, json.dumps({"embedding": [0.1, 0.2]}).encode()
+        return 404, b"{}"
+
+    ollama = OllamaProvider(transport=fake_transport)
+    result = run_provider_contract(ollama)
+    expect(result["chat_ok"] and not result["violations"], f"ollama contract: {result}")
+    expect(ollama.health()["ok"], "ollama health")
+
+    # manifests: builtin set validates; bad manifests are refused
+    manifests, errors = load_manifests(None)
+    expect(len(manifests) >= 2 and not errors, f"builtin manifests: {errors}")
+    ok, errs = validate_manifest({"id": "x", "locality": "cloud",
+                                  "privacy_class": "private_ok"})
+    expect(not ok and any("cannot be private_ok" in e for e in errs), f"cloud/private_ok: {errs}")
+
+    # error classification
+    expect(classify_error(TimeoutError()) == "timeout", "timeout class")
+    expect(classify_error(ConnectionError()) == "unknown"
+           or classify_error(ConnectionError()) == "connection", "connection class")
+
+    # gateway: primary fails with a connection error, fallback answers.
+    # complete() builds its own chain via make_brain_chain, so the fakes are
+    # injected through the factory (version-proof: no SDK exception objects).
+    class _FailingBrain:
+        model = "primary-m"
+        base_url = "x"
+
+        def client(self):
+            raise ConnectionError("down")
+
+    class _FakeCompletions:
+        def create(self, **kwargs):
+            return FakeResp(FakeMsg("fallback answered"))
+
+    class _FallbackBrain:
+        model = "fallback-m"
+        base_url = "x"
+
+        def client(self):
+            return types.SimpleNamespace(chat=types.SimpleNamespace(completions=_FakeCompletions()))
+
+    cfg = config.Config(brains=config.BrainsConfig(
+        primary=config.BrainConfig(type="local", provider="ollama",
+                                   base_url="http://localhost:11434/v1",
+                                   model="primary-m"),
+        fallback=config.BrainConfig(type="local", provider="ollama",
+                                    base_url="http://localhost:11434/v1",
+                                    model="fallback-m")))
+    out = io.StringIO()
+    import jarvis.brain as brain_pkg
+    saved_factory = brain_pkg.make_brain_chain
+    brain_pkg.make_brain_chain = lambda cfg2, on_status=None: BrainChain(
+        _FailingBrain(), _FallbackBrain(), on_status=on_status,
+        transient_check=lambda exc: True)
+    try:
+        result = complete({"text": "hello"}, cfg=cfg, on_status=out.write)
+    finally:
+        brain_pkg.make_brain_chain = saved_factory
+    expect(result["reply"] == "fallback answered", f"gateway reply: {result}")
+    expect(result["route"]["fallback_active"] is True, "route must record failover")
+    expect("fallback-m" in result["route"]["model"], result["route"])
+
+    # doctor: runs clean on a patched live-ish config and reports findings
+    saved = config.config_dir
+    config.config_dir = lambda: tmp / "cfgdoc"
+    try:
+        config.Config(brains=config.BrainsConfig(
+            primary=config.BrainConfig(type="local", provider="ollama",
+                                       base_url="http://localhost:11434/v1",
+                                       model="qwen2.5:7b"))).save()
+        out2 = io.StringIO()
+        code = doctor.run_doctor(Console(file=out2, force_terminal=False))
+        expect(code == 0, "doctor must exit 0 (it is a report, not a gate)")
+        expect("UMBRA DOCTOR" in out2.getvalue(), "doctor panel missing")
+    finally:
+        config.config_dir = saved
+
+
+def brain_router_v1(tmp: Path) -> None:
+    """Brain v1 - the privacy router: sensitivity, budget, redaction, log."""
+    import json as jsonlib
+
+    from jarvis.brain.manifest import BUILTIN_MANIFESTS
+    from jarvis.brain.router import (RouterConfig, classify, is_sensitive,
+                                     redact_for_cloud, route)
+
+    cfg = RouterConfig(cloud_providers=["openai"])
+
+    # classification rules
+    expect(classify("refactor this function") == "code", "code class")
+    expect(classify("summarize this for me") == "summarize", "summarize class")
+    expect(classify("check my battery") == "tool_use", "tool_use class")
+    expect(classify("hello there") == "chat", "chat class")
+
+    # sensitivity: private data pins the route to private_ok models
+    local = [m for m in BUILTIN_MANIFESTS if m["locality"] == "local"][0]
+    cloud = [m for m in BUILTIN_MANIFESTS if m["locality"] == "cloud"][0]
+    manifest, why = route({"text": "my file is at C:\\Users\\me\\secret.txt"},
+                          BUILTIN_MANIFESTS, cfg, tmp / "route-log.jsonl")
+    expect(manifest is not None and manifest["privacy_class"] == "private_ok",
+           f"sensitive text must route private: {why}")
+    manifest, why = route({"text": "email me at boss@corp.example.com please"},
+                          BUILTIN_MANIFESTS, cfg, tmp / "route-log.jsonl")
+    expect(manifest is not None and manifest["privacy_class"] == "private_ok", why)
+
+    # non-sensitive + cloud opted in: cheapest strength-match wins (local, free)
+    manifest, why = route({"text": "what is the speed of light"},
+                          BUILTIN_MANIFESTS, cfg, tmp / "route-log.jsonl")
+    expect(manifest is not None and manifest["locality"] == "local", why)
+
+    # vision requirement: only a vision-capable model qualifies (none builtin)
+    manifest, why = route({"text": "what is this", "vision": True},
+                          BUILTIN_MANIFESTS, cfg, tmp / "route-log.jsonl")
+    expect(manifest is None and "capability" in why, f"vision: {why}")
+
+    # budget: a paid cloud model excluded when the daily budget is spent
+    log_path = tmp / "route-log.jsonl"
+    spent_entry = {"ts": time.strftime("%Y-%m-%dT%H:%M:%S"), "model": "cloud/x",
+                   "est_cost": 9.99}
+    log_path.write_text(jsonlib.dumps(spent_entry) + "\n", encoding="utf-8")
+    strict = RouterConfig(cloud_providers=["openai"], daily_budget=0.50,
+                          max_cost_per_request=0.05)
+    manifest, why = route({"text": "plain chat, nothing private"}, BUILTIN_MANIFESTS,
+                          strict, log_path)
+    expect(manifest is not None and manifest["locality"] == "local",
+           f"over-budget cloud must be skipped: {why}")
+
+    # redaction gate: paths, emails, keys, license shapes all scrubbed
+    dirty = "code at C:\\Users\\me\\x.py mail a@b.co key sk-abcdef0123456789 lic UMBRA-AbCdEf.ghiJKLmno"
+    clean = redact_for_cloud(dirty)
+    expect("C:\\Users" not in clean and "a@b.co" not in clean, f"redaction missed: {clean}")
+    expect("sk-abcdef" not in clean and "UMBRA-AbCdEf" not in clean, clean)
+    expect("[REDACTED-PATH]" in clean and "[REDACTED-EMAIL]" in clean, clean)
+
+    # route log: metadata only - never the prompt text
+    log_path.write_text("", encoding="utf-8")
+    route({"text": "a private sentence nobody may log"}, BUILTIN_MANIFESTS, cfg, log_path)
+    logged = log_path.read_text(encoding="utf-8")
+    expect("private sentence" not in logged, "route log must not contain prompt text")
+    expect("model" in logged and "est_cost" in logged, "route log metadata missing")
 
 
 def registry_built() -> None:
@@ -3016,6 +3242,8 @@ def main() -> int:
     check("EDITH protocol", lambda: edith_protocol(tmp_path))
     check("policy spine: authorize", lambda: spine_authorize(tmp_path))
     check("GA hardening", lambda: ga_hardening(tmp_path))
+    check("brain v0: providers + gateway + doctor", lambda: brain_v0_providers_gateway(tmp_path))
+    check("brain v1: privacy router", lambda: brain_router_v1(tmp_path))
 
     check("BrainChain failover", chain_failover)
     check("BrainChain non-transient raises", chain_non_transient_raises)
