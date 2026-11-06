@@ -1,31 +1,13 @@
-Phase 2A: the eval baseline (25 scenarios, offline harness)
+Phase 5: memory CLI + evening briefing
 
-Before any router or provider change reshapes behavior, the current
-single-model behavior is captured as a golden suite.
-
-- src/jarvis/evals.py: the engine. Loads scenario data, applies per-
-  scenario setup in isolated config dirs (tier via throwaway signer,
-  grants, memory notes, files, personality), replays scripted model steps
-  through the REAL agent machinery (Agent + registry + gates), and
-  evaluates predicate checks - tool_called (with valid-JSON arguments),
-  no_tool_called, schema_valid, reply_contains/matches/not_contains,
-  confirm_asked, tool_absent/present (tier enforcement), reach_denied
-  (default-deny reach), system_prompt_contains, memory_contains/absent,
-  tool_result_role (the data-channel check). compare_results() flags
-  regressions (passed before, failed now - known failures excluded),
-  recoveries, and still-failing scenarios.
-- tests/evals/: 25 scenarios in 6 category files (5 tool calling,
-  5 gate enforcement, 3 destructive confirmations, 4 memory, 5
-  prompt-injection plumbing, 3 persona), harness.py (CLI runner: run
-  [--live] [--category] [--write-baseline], compare), and the recorded
-  baseline.json.
-- Known failures, honest: gate-005 (the PRO upgrade hint lives in the
-  CLI dispatcher, not the agent tool loop) and persona-002 (the
-  personality honorific does not reach the system prompt yet - deferred
-  in Mark XXVIII). Both marked known_failure with reasons; the suite
-  counts them separately and reports recoveries.
-- jarvis eval run [--live] [--category X] and jarvis eval compare
-  <baseline> <new> wired into the CLI; the smoke suite runs the engine
-  and asserts the baseline (scoring, regression detection, baseline file
-  round-trip, redaction unit checks).
-- Version 3.23.0.
+- jarvis memory list | search <q> | forget <id> | undo | export [file] | wipe [--yes]:
+  the second brain becomes directly manageable from the CLI. forget stashes
+  the note for undo (memory-undo.json); undo restores it; export writes
+  JSON; wipe clears all (requires explicit confirm or --yes).
+- sentinel.py: compose_evening_briefing — today's recap, unfinished board
+  tasks, health line, daily reminder count for tomorrow; run_sentinel
+  gains an optional evening_time parameter.
+- Morning briefing recaps the most recent recorded session (continuity).
+- Tests: stash/undo round trip, export content, wipe, evening briefing
+  content, morning briefing intact.
+- Version 3.24.0.

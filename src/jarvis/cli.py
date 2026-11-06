@@ -495,6 +495,7 @@ def _dispatch(argv: list[str] | None = None) -> int:
             "  wake        hands-free voice mode: say 'Jarvis' + command\n"
             "  health      the Oracle: HR/HRV screening report\n"
             "  sentinel    the Sentinel: reminders + morning briefing daemon\n"
+            "  memory      list | search | forget | undo | export | wipe - second brain\n"
             "  face        the Avatar: local web face + chat (Mark VI)\n"
             "  portal      the Portal: WebXR room for headsets (Mark VII)\n"
             "  serve       the Bridge: full agent over the LAN (PRO) · serve --api: local API\n"
@@ -541,7 +542,18 @@ def _dispatch(argv: list[str] | None = None) -> int:
     if argv and argv[0] == "sentinel":
         from .sentinel import run_sentinel
 
-        return run_sentinel(console)
+        rest = argv[1:]
+        briefing = "08:00"
+        evening = None
+        if "--briefing" in rest:
+            index = rest.index("--briefing")
+            if index + 1 < len(rest):
+                briefing = rest[index + 1]
+        if "--evening" in rest:
+            index = rest.index("--evening")
+            if index + 1 < len(rest):
+                evening = rest[index + 1]
+        return run_sentinel(console, briefing_time=briefing, evening_time=evening)
     if argv and argv[0] == "face":
         from .avatar import run_avatar
 
@@ -751,6 +763,77 @@ def _dispatch(argv: list[str] | None = None) -> int:
             console.print(f"token: {mask_key(load_token())}\nfile: {token_path()}")
             return 0
         console.print("usage: jarvis api token rotate | jarvis api token show")
+        return 1
+    if argv and argv[0] == "memory":
+        from .memory import (
+            count_notes,
+            export_notes,
+            forget_and_stash,
+            recent_notes,
+            search_notes,
+            undo_forget,
+            wipe_notes,
+        )
+
+        sub = argv[1] if len(argv) > 1 else "list"
+        if sub == "list":
+            notes = recent_notes(50)
+            if not notes:
+                console.print("[dim]Memory is empty.[/]")
+                return 0
+            for note in notes:
+                console.print(f"  #{note['id']} [{note['created_at']}] {note['content']}")
+            console.print(f"[dim]{count_notes()} note(s) total.[/]")
+            return 0
+        if sub == "search":
+            query = " ".join(argv[2:]).strip()
+            if not query:
+                console.print("usage: jarvis memory search <query>")
+                return 1
+            results = search_notes(query, 20)
+            if not results:
+                console.print("[dim]No matching memories.[/]")
+                return 0
+            for note in results:
+                console.print(f"  #{note['id']} [{note['created_at']}] {note['content']}")
+            return 0
+        if sub == "forget":
+            if len(argv) < 3 or not argv[2].isdigit():
+                console.print("usage: jarvis memory forget <id>")
+                return 1
+            note_id = int(argv[2])
+            from rich.prompt import Confirm
+
+            if not Confirm.ask(f"[yellow]Permanently delete memory #{note_id}?[/]", default=False):
+                console.print("[dim]Aborted.[/]")
+                return 1
+            stashed = forget_and_stash(note_id)
+            if stashed is None:
+                console.print(f"[red]No memory with id {note_id}.[/]")
+                return 1
+            console.print(f"[green]Deleted memory #{note_id}.[/] Undo: jarvis memory undo")
+            return 0
+        if sub == "undo":
+            stashed = undo_forget()
+            if stashed is None:
+                console.print("[yellow]Nothing to undo.[/]")
+                return 1
+            console.print(f"[green]Restored:[/] #{stashed['note_id']} {stashed['content']}")
+            return 0
+        if sub == "export":
+            out = Path(argv[2] if len(argv) > 2 else "umbra-memory-export.json")
+            count = export_notes(out)
+            console.print(f"[green]Exported {count} note(s) to {out}[/]")
+            return 0
+        if sub == "wipe":
+            if "--yes" not in argv[2:]:
+                if not Confirm.ask("[yellow]Permanently delete ALL memories?[/]", default=False):
+                    console.print("[dim]Aborted.[/]")
+                    return 1
+            count = wipe_notes()
+            console.print(f"[green]Wiped {count} note(s).[/]")
+            return 0
+        console.print("usage: jarvis memory list | search <q> | forget <id> | undo | export [file] | wipe [--yes]")
         return 1
     if argv and argv[0] == "overlay":
         from .overlay import run_overlay

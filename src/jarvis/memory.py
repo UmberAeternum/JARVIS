@@ -8,6 +8,7 @@ with ESCAPE, so user input can never alter the query structure.
 
 from __future__ import annotations
 
+import json
 import sqlite3
 from datetime import datetime, timezone
 
@@ -90,6 +91,81 @@ def forget_note(note_id: int) -> bool:
         cursor = connection.execute("DELETE FROM memories WHERE id = ?", (int(note_id),))
         connection.commit()
         return cursor.rowcount > 0
+    finally:
+        connection.close()
+
+
+# ------------------------------------------------------- Phase 5: CLI support
+
+
+def _undo_path():
+    return config.config_dir() / "memory-undo.json"
+
+
+def forget_and_stash(note_id: int) -> dict | None:
+    """Delete a note but stash its content for undo. Returns the stashed
+    record {"note_id", "content"} or None when the id did not exist."""
+    connection = _connect()
+    try:
+        row = connection.execute(
+            "SELECT content FROM memories WHERE id = ?", (int(note_id),)
+        ).fetchone()
+        if row is None:
+            return None
+        if not forget_note(note_id):
+            return None
+    finally:
+        connection.close()
+    stash = {"note_id": int(note_id), "content": row[0], "stashed_at": _now()}
+    path = _undo_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(stash, ensure_ascii=False), encoding="utf-8")
+    return stash
+
+
+def undo_forget() -> dict | None:
+    """Restore the most recently stashed (forgotten) note. Returns the
+    restored record or None when there is nothing to undo."""
+    path = _undo_path()
+    if not path.is_file():
+        return None
+    try:
+        stash = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    new_id = save_note(str(stash.get("content", "")))
+    path.unlink(missing_ok=True)
+    return {"note_id": new_id, "content": stash.get("content", "")}
+
+
+def export_notes(path: Path) -> int:
+    """Write every note to a JSON file. Returns the count exported."""
+    notes = recent_notes(1_000_000)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps({"exported": _now(), "count": len(notes), "notes": notes},
+                   ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+    return len(notes)
+
+
+def wipe_notes() -> int:
+    """Delete every note. Returns the number deleted. Callers must confirm."""
+    connection = _connect()
+    try:
+        cursor = connection.execute("DELETE FROM memories")
+        connection.commit()
+        return int(cursor.rowcount)
+    finally:
+        connection.close()
+
+
+def count_notes() -> int:
+    connection = _connect()
+    try:
+        row = connection.execute("SELECT COUNT(*) FROM memories").fetchone()
+        return int(row[0])
     finally:
         connection.close()
 

@@ -107,7 +107,7 @@ class FakeBrain:
 
 
 def version_string() -> None:
-    expect(__version__ == "3.23.0", __version__)
+    expect(__version__ == "3.24.0", __version__)
 
 
 class MockProvider(Provider):
@@ -3225,6 +3225,55 @@ def ga_hardening(tmp: Path) -> None:
         config.config_dir = original
 
 
+def memory_cli_and_evening(tmp: Path) -> None:
+    """Phase 5 - memory CLI engine (stash/undo/export/wipe) + evening briefing."""
+    from jarvis.memory import (
+        count_notes, export_notes, forget_and_stash, recent_notes,
+        save_note, undo_forget, wipe_notes,
+    )
+    from jarvis.sentinel import compose_evening_briefing, compose_briefing
+
+    original = config.config_dir
+    config.config_dir = lambda: tmp / "cfgmem5"
+    try:
+        save_note("the vault code is 4471")
+        save_note("likes tea in the morning")
+
+        stashed = forget_and_stash(1)
+        expect(stashed is not None and stashed["content"] == "the vault code is 4471",
+               f"stash: {stashed}")
+        expect(recent_notes(10)[0]["content"] == "likes tea in the morning", "wrong survivor")
+        restored = undo_forget()
+        expect(restored is not None and "4471" in restored["content"], f"undo: {restored}")
+        expect(undo_forget() is None, "second undo must be a no-op")
+
+        out = tmp / "export.json"
+        count = export_notes(out)
+        expect(count == 2, f"export count: {count}")
+        exported = json.loads(out.read_text(encoding="utf-8"))
+        expect(exported["count"] == 2 and len(exported["notes"]) == 2, "export content")
+
+        wiped = wipe_notes()
+        expect(wiped == 2, f"wipe count: {wiped}")
+        expect(count_notes() == 0, "wipe must empty the store")
+
+        briefing = compose_evening_briefing()
+        expect("Evening wrap-up" in briefing, f"evening greeting: {briefing}")
+        expect("Unfinished:" in briefing, f"evening tasks: {briefing}")
+        expect("Health:" in briefing, f"evening health: {briefing}")
+        expect("not a medical diagnosis" in briefing, f"disclaimer: {briefing}")
+
+        morning = compose_briefing()
+        expect("The briefing:" in morning, f"morning briefing: {morning}")
+    finally:
+        config.config_dir = original
+
+    from jarvis.sentinel import parse_when
+
+    kind, value = parse_when("20:00")
+    expect(kind == "daily" and value == "20:00", f"evening parse: {kind} {value}")
+
+
 def eval_baseline(tmp: Path) -> None:
     """Phase 2A - the eval engine: scoring, regression detection, compare."""
     import io
@@ -3319,6 +3368,7 @@ def main() -> int:
         check("config voice round-trip (v3)", lambda: config_voice_roundtrip(tmp_path))
         check("config vision round-trip (v4)", lambda: config_vision_roundtrip(tmp_path))
         check("memory tools round-trip", lambda: memory_tools_roundtrip(tmp_path))
+        check("memory CLI + evening briefing", lambda: memory_cli_and_evening(tmp_path))
         check("screen tools gated", lambda: screen_tools_gated(tmp_path))
         check("health store + CSV import", lambda: health_store_and_import(tmp_path))
         check("health baseline + risk bands", lambda: health_baseline_and_risk(tmp_path))

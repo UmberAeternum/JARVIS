@@ -145,6 +145,57 @@ def due_now(reminder: dict, now: datetime, fired_on: dict[int, str]) -> bool:
     return now >= when
 
 
+def compose_evening_briefing() -> str:
+    """Phase 5 - the evening briefing: today's recap and tomorrow's posture.
+    Same local data as the morning briefing, framed for end of day."""
+    from . import health
+    from .memory import recent_notes
+    from .personality import load as load_personality
+    from .portal import load_board
+
+    honorific = load_personality().get("honorific", "Sir")
+    lines = [f"Evening wrap-up, {honorific}:"]
+
+    try:
+        from .conversations import list_sessions
+
+        sessions = list_sessions(1)
+        if sessions:
+            last = sessions[0]
+            lines.append(
+                f"Today's last session: {last.get('title', '')} "
+                f"({last.get('turns', 0)} turns)."
+            )
+    except Exception:
+        pass
+
+    try:
+        board = load_board()
+        tasks = board.get("tasks", [])
+        todo = [t for t in tasks if t.get("column") == "todo"]
+        doing = [t for t in tasks if t.get("column") == "doing"]
+        lines.append(f"Unfinished: {len(doing)} in progress, {len(todo)} waiting for tomorrow.")
+    except Exception:
+        pass
+
+    try:
+        report = health.risk_assessment()
+        lines.append("Health: " + report.splitlines()[0])
+    except Exception:
+        pass
+
+    try:
+        reminders = load_reminders()
+        daily = [r for r in reminders if r.get("kind") == KIND_DAILY]
+        if daily:
+            lines.append(f"{len(daily)} daily reminder(s) will fire tomorrow.")
+    except Exception:
+        pass
+
+    lines.append(health.DISCLAIMER)
+    return "\n".join(lines)
+
+
 def compose_briefing() -> str:
     """Morning briefing from local data: health, kanban, memory. Honest
     about missing pieces; needs no API key and no brain. The honorific
@@ -157,7 +208,7 @@ def compose_briefing() -> str:
     honorific = load_personality().get("honorific", "Sir")
     lines = [f"Good morning, {honorific}. The briefing:"]
 
-    # Mark XXVII: continuity - recap the most recent recorded session
+    # Mark XXVII + Phase 5: continuity - recap the most recent recorded session
     try:
         from .conversations import list_sessions
 
@@ -251,9 +302,11 @@ def register_sentinel_tools(registry) -> None:
     )
 
 
-def run_sentinel(console, interval_s: int = 20, briefing_time: str = "08:00") -> int:
+def run_sentinel(console, interval_s: int = 20, briefing_time: str = "08:00",
+                 evening_time: str | None = None) -> int:
     """The standalone daemon: fires due reminders and the daily briefing,
-    printed and spoken. Announces only - no tool execution happens unattended."""
+    printed and spoken. Announces only - no tool execution happens unattended.
+    Phase 5: an optional evening wrap-up briefing (evening_time='HH:MM')."""
     try:
         briefing_kind, briefing_value = parse_when(briefing_time)
     except ValueError as exc:
@@ -262,6 +315,16 @@ def run_sentinel(console, interval_s: int = 20, briefing_time: str = "08:00") ->
     if briefing_kind != KIND_DAILY:
         console.print("[red]briefing_time must be HH:MM (daily)[/]")
         return 1
+    evening_value = None
+    if evening_time:
+        try:
+            evening_kind, evening_value = parse_when(evening_time)
+        except ValueError as exc:
+            console.print(f"[red]{exc}[/]")
+            return 1
+        if evening_kind != KIND_DAILY:
+            console.print("[red]evening_time must be HH:MM (daily)[/]")
+            return 1
 
     reminders = load_reminders()
     fired_on: dict[object, str] = {}
@@ -300,8 +363,9 @@ def run_sentinel(console, interval_s: int = 20, briefing_time: str = "08:00") ->
         Panel(
             f"Sentinel online - checking every {interval_s}s. "
             f"Reminders loaded: {len(reminders)}. Watch rules loaded: "
-            f"{len(watchtower.load_rules())}. Briefing at {briefing_value}. "
-            "Ctrl+C to stand down.",
+            f"{len(watchtower.load_rules())}. Briefing at {briefing_value}."
+            + (f" Evening wrap-up at {evening_value}." if evening_value else "")
+            + " Ctrl+C to stand down.",
             title="THE SENTINEL",
             border_style="cyan",
         )
@@ -323,6 +387,13 @@ def run_sentinel(console, interval_s: int = 20, briefing_time: str = "08:00") ->
             ):
                 fired_on["briefing"] = now.strftime("%Y-%m-%d")
                 announce(compose_briefing())
+            if evening_value and due_now(
+                {"kind": KIND_DAILY, "when": evening_value, "id": "evening"},
+                now,
+                fired_on,
+            ):
+                fired_on["evening"] = now.strftime("%Y-%m-%d")
+                announce(compose_evening_briefing())
 
             # Mark XI - the Watchtower: ambient rules, evaluated each cycle
             for rule in [r for r in watchtower.load_rules() if r.get("kind") == "vitals"]:
