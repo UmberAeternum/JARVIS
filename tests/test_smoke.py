@@ -3274,12 +3274,16 @@ def main() -> int:
     finally:
         # On Windows, SQLite connections garbage-collected during context-manager
         # teardown can hold the temp dir open (WinError 32). Collect, then retry.
+        # On 3.10, tempfile's internal onerror retry can surface the lock as
+        # NotADirectoryError, so ANY OSError is retried; if the dir is still
+        # dirty after the loop we tolerate it - deleting the tmp dir is not
+        # part of what this suite tests (no later check reuses cfgdash).
         gc.collect()
         for _ in range(5):
             try:
                 tmp_obj.cleanup()
                 break
-            except PermissionError:
+            except OSError:
                 time.sleep(0.3)
     check("settings apply + redaction", lambda: settings_apply_and_redact(tmp_path))
     check("setup --yes non-interactive paths", lambda: setup_noninteractive_paths(tmp_path))
