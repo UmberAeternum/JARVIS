@@ -168,6 +168,27 @@ def grant_full(phrase_input: str) -> tuple[bool, str]:
     return grant_tiers(list(TIERS), phrase_input)
 
 
+def tier_snapshot(now: float | None = None) -> dict[str, dict]:
+    """Phase 7 - machine-readable per-tier state for the trust dashboard:
+    every tier is always listed, each as {granted, expires_ts} (expires_ts is
+    None when the tier is not active)."""
+    now = time.time() if now is None else now
+    state = _load_state()
+    grants = state.get("grants") or {}
+    snapshot: dict[str, dict] = {}
+    for tier in TIERS:
+        grant = grants.get(tier)
+        active = _tier_active(tier, state, now)
+        expires: float | None = None
+        if active and isinstance(grant, dict):
+            try:
+                expires = float(grant.get("expires_ts", 0)) or None
+            except (TypeError, ValueError):
+                expires = None
+        snapshot[tier] = {"granted": active, "expires_ts": expires}
+    return snapshot
+
+
 def revoke_all() -> str:
     _save_state({"fingerprint": device_fingerprint()})
     log_append("revoke_all", "all tier grants revoked")

@@ -107,7 +107,7 @@ class FakeBrain:
 
 
 def version_string() -> None:
-    expect(__version__ == "3.25.0", __version__)
+    expect(__version__ == "3.26.0", __version__)
 
 
 class MockProvider(Provider):
@@ -2373,6 +2373,178 @@ def bridge_streaming_roundtrip(tmp: Path) -> None:
         thread.join(timeout=5)
 
 
+def trust_dashboard(tmp: Path) -> None:
+    """Phase 7 - the trust dashboard: /api/access structure and integrity,
+    one-tap revoke, and the privacy meter's counts from the route log."""
+    import http.client
+
+    from jarvis import access as access_mod
+    from jarvis import dashboard as dash
+
+    original = config.config_dir
+    config.config_dir = lambda: tmp / "cfgtrust"
+    try:
+        # seed the ledger: a denied reach first, then a real grant (the
+        # phrase is mandatory - every entry lands in the tamper-evident log)
+        allowed, reason = access_mod.authorize("api.chat", "probe", actor="api")
+        expect(not allowed, "api.chat must be denied before any grant")
+        ok, msg = access_mod.grant_tiers(["observe", "assist"],
+                                         access_mod.CONFIRMATION_PHRASE, window_h=1)
+        expect(ok, f"grant failed: {msg}")
+
+        state = types.SimpleNamespace(turn_running=False)  # endpoints need no agent
+        server, port, thread = dash.start_server(state, preferred_port=0)
+        conn = http.client.HTTPConnection("127.0.0.1", port, timeout=10)
+        bodies: list[str] = []
+
+        def fetch(path: str):
+            conn.request("GET", path)
+            resp = conn.getresponse()
+            body = resp.read().decode("utf-8")
+            bodies.append(body)
+            return resp.status, json.loads(body)
+
+        try:
+            status, data = fetch("/api/access")
+            expect(status == 200, f"/api/access status: {status}")
+            expect(set(data["tiers"]) == {"observe", "assist", "act", "install"},
+                   f"tier structure: {sorted(data['tiers'])}")
+            for tier, info in data["tiers"].items():
+                expect(isinstance(info.get("granted"), bool), f"{tier} granted type")
+                expect("expires_ts" in info, f"{tier} expiry missing")
+            expect(data["tiers"]["observe"]["granted"] is True, "observe must be granted")
+            expect(data["tiers"]["assist"]["granted"] is True, "assist must be granted")
+            expect(data["tiers"]["act"]["granted"] is False, "act must stay denied")
+            expect(data["tiers"]["install"]["granted"] is False, "install must stay denied")
+            expect(isinstance(data["tiers"]["observe"]["expires_ts"], float),
+                   "granted tier carries its expiry timestamp")
+            entries = data["log_tail"]
+            expect(isinstance(entries, list) and len(entries) >= 2,
+                   f"log tail entries: {entries}")
+            for entry in entries:
+                expect(all(key in entry for key in
+                           ("ts", "action", "detail", "actor", "integrity")),
+                       f"ledger entry fields: {entry}")
+            expect(any(e["action"] == "grant" for e in entries),
+                   "the grant must be in the ledger tail")
+            expect(any(e["action"] == "reach_denied" and e["actor"] == "api" for e in entries),
+                   "denied reaches are recorded with their actor")
+            expect(data["integrity"] == "OK", f"fresh ledger integrity: {data['integrity']}")
+
+            # the privacy meter: seed the route log (metadata only)
+            cfgdir = tmp / "cfgtrust"
+            cfgdir.mkdir(parents=True, exist_ok=True)
+            route_log = cfgdir / "route-log.jsonl"
+            today = time.strftime("%Y-%m-%d")
+            route_log.write_text(
+                json.dumps({"ts": f"{today}T10:00:00", "model": "ollama/qwen2.5:7b",
+                            "est_cost": 0.0}) + "\n"
+                + json.dumps({"ts": f"{today}T11:00:00", "model": "openai-compat/configured",
+                              "est_cost": 0.012}) + "\n"
+                + json.dumps({"ts": "2020-01-01T00:00:00", "model": "ollama/qwen2.5:7b",
+                              "est_cost": 9.9}) + "\n",
+                encoding="utf-8")
+            status, data = fetch("/api/privacy")
+            expect(status == 200, f"/api/privacy status: {status}")
+            expect(data.get("local_calls") == 2 and data.get("cloud_calls") == 1,
+                   f"privacy counts: {data}")
+            expect(abs(data.get("spent_today", -1) - 0.012) < 1e-9,
+                   f"spend today: {data}")
+
+            # one tap kills every grant - and says so
+            conn.request("POST", "/api/access/revoke", body="{}",
+                         headers={"Content-Type": "application/json"})
+            resp = conn.getresponse()
+            body = resp.read().decode("utf-8")
+            bodies.append(body)
+            confirmed = json.loads(body)
+            expect(resp.status == 200 and confirmed.get("revoked") is True,
+                   f"revoke confirmation: {resp.status} {confirmed}")
+            expect(not access_mod.full_active(), "grants must be gone after revoke")
+            status, data = fetch("/api/access")
+            expect(all(not info["granted"] for info in data["tiers"].values()),
+                   f"no tier survives the revoke: {data['tiers']}")
+            expect(any(e["action"] == "revoke_all" for e in data["log_tail"]),
+                   "the revoke is in the ledger")
+            expect(data["integrity"] == "OK", "revoke must not break the chain")
+        finally:
+            conn.close()
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=5)
+
+        # no secrets anywhere in the responses
+        for body in bodies:
+            expect(FAKE_KEY not in body and FAKE_OLD_KEY not in body,
+                   "a secret leaked in a trust dashboard response")
+    finally:
+        config.config_dir = original
+
+
+def trust_companion(tmp: Path) -> None:
+    """Phase 7 - the phone companion: the bridge's briefing endpoint, the
+    PWA manifest, and the page's Briefing button + install meta tags."""
+    import http.client
+
+    from jarvis import serve as bridge_srv
+    from jarvis.serve_page import PAGE_BRIDGE, PWA_MANIFEST
+
+    original = config.config_dir
+    config.config_dir = lambda: tmp / "cfgtrustcompanion"
+    try:
+        # the page is installable: PWA link + the meta tags phones read
+        expect('rel="manifest"' in PAGE_BRIDGE, "PWA manifest link missing")
+        expect("theme-color" in PAGE_BRIDGE and "apple-mobile-web-app-capable" in PAGE_BRIDGE,
+               "PWA meta tags missing")
+        expect("BRIEF" in PAGE_BRIDGE and "/api/briefing" in PAGE_BRIDGE,
+               "Briefing button missing from the bridge page")
+        manifest = json.loads(PWA_MANIFEST)
+        expect(manifest.get("display") == "standalone" and manifest.get("short_name"),
+               f"manifest shape: {manifest}")
+
+        state = bridge_srv.BridgeState(config.Config(), "companiontok", confirm_timeout=2.0)
+        server, port, thread = bridge_srv.start_server(state, preferred_port=18785)
+        bodies: list[str] = []
+        conn = http.client.HTTPConnection("127.0.0.1", port, timeout=10)
+
+        def fetch(path: str, headers: dict | None = None):
+            conn.request("GET", path, headers=headers or {})
+            resp = conn.getresponse()
+            body = resp.read().decode("utf-8")
+            bodies.append(body)
+            return resp.status, body
+
+        try:
+            # the manifest loads without the token (no secrets inside)
+            status, body = fetch("/manifest.json")
+            expect(status == 200, f"manifest status: {status}")
+            served = json.loads(body)
+            expect(served.get("name") == manifest["name"], "manifest served wrong")
+
+            # the briefing needs the token like every other api call
+            status, body = fetch("/api/briefing")
+            expect(status == 403, f"briefing must require the token: {status}")
+            status, body = fetch("/api/briefing", {"X-Jarvis-Token": "companiontok"})
+            expect(status == 200, f"briefing status: {status}")
+            data = json.loads(body)
+            text = data.get("briefing", "")
+            expect("The briefing:" in text, f"briefing text: {text[:120]!r}")
+            expect("Health:" in text, "briefing should carry the health line")
+        finally:
+            conn.close()
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=5)
+
+        # no secrets in any response body (keys, tokens, or key-shaped text)
+        for body in bodies:
+            expect(FAKE_KEY not in body and FAKE_OLD_KEY not in body,
+                   "a secret leaked in a companion response")
+            expect("companiontok" not in body, "the session token leaked in a body")
+    finally:
+        config.config_dir = original
+
+
 def api_endpoints_and_auth(tmp: Path) -> None:
     """Mark XXVI - app injection: the embeddable local API."""
     import http.client
@@ -3665,6 +3837,8 @@ def main() -> int:
     check("history endpoints + resume", lambda: history_endpoints_and_resume(tmp_path))
     check("dashboard streaming round-trip", lambda: dashboard_streaming_roundtrip(tmp_path))
     check("bridge streaming round-trip", lambda: bridge_streaming_roundtrip(tmp_path))
+    check("trust dashboard: access tiers + revoke + privacy", lambda: trust_dashboard(tmp_path))
+    check("trust companion: briefing + PWA install", lambda: trust_companion(tmp_path))
     check("api endpoints + auth", lambda: api_endpoints_and_auth(tmp_path))
     check("overlay no-ui paths", lambda: overlay_no_ui(tmp_path))
     check("plugin scaffolds", lambda: plugin_scaffolds(tmp_path))

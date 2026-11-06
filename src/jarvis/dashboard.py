@@ -2,8 +2,8 @@
 
 A single-page dashboard served at 127.0.0.1 only (never exposed to the
 network). Tabbed interface: Chat, Health (the Oracle), Memory (the second
-brain), Kanban, Watch rules, and Settings — every subsystem visual and
-clickable instead of CLI-only.
+brain), Kanban, Watch rules, Settings, and Trust (Phase 7) — every
+subsystem visual and clickable instead of CLI-only.
 
 Mark XXI: the console tab runs the FULL agent — all tools, the same
 confirmation gate as the CLI, delivered in the browser as APPROVE/DENY
@@ -189,6 +189,79 @@ class DashboardState:
             pass  # logging must never break the conversation
 
 
+# ------------------------------------------------------------------- trust
+
+
+def access_snapshot() -> dict:
+    """Phase 7 - the trust dashboard payload: per-tier grants (granted +
+    expiry), the last 20 ledger entries (ts/action/detail/actor/integrity,
+    newest first) and the overall chain integrity verdict."""
+    from . import access
+
+    entries = access.log_entries()
+    tail = [
+        {
+            "ts": str(entry.get("ts", "")),
+            "action": str(entry.get("action", "")),
+            "detail": str(entry.get("detail", "")),
+            "actor": str(entry.get("actor", "")),
+            "integrity": str(entry.get("integrity", "?")),
+        }
+        for entry in entries[-20:]
+    ]
+    tail.reverse()  # newest first for the live log
+    return {
+        "tiers": access.tier_snapshot(),
+        "log_tail": tail,
+        "integrity": "OK" if access.verify_log() else "TAMPERED",
+    }
+
+
+def privacy_snapshot() -> dict:
+    """Phase 7 - the privacy meter, read from the router's route log
+    (metadata only, never prompts): total local vs cloud calls and today's
+    estimated spend. Unknown model ids count as cloud - the conservative
+    reading for a privacy meter."""
+    from .brain.manifest import load_manifests, manifests_dir
+
+    locality: dict[str, str] = {}
+    manifests, _errors = load_manifests(extra_dir=manifests_dir())
+    for manifest in manifests:
+        locality[str(manifest.get("id", ""))] = str(manifest.get("locality", "cloud"))
+    local_calls = 0
+    cloud_calls = 0
+    spent_today = 0.0
+    today = time.strftime("%Y-%m-%d")
+    path = config.config_dir() / "route-log.jsonl"
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines() if path.is_file() else []
+    except OSError:
+        lines = []
+    for line in lines:
+        if not line.strip():
+            continue
+        try:
+            entry = json.loads(line)
+        except ValueError:
+            continue
+        if not isinstance(entry, dict):
+            continue
+        if locality.get(str(entry.get("model", "")), "cloud") == "local":
+            local_calls += 1
+        else:
+            cloud_calls += 1
+        if str(entry.get("ts", "")).startswith(today):
+            try:
+                spent_today += float(entry.get("est_cost", 0.0) or 0.0)
+            except (TypeError, ValueError):
+                pass
+    return {
+        "local_calls": local_calls,
+        "cloud_calls": cloud_calls,
+        "spent_today": round(spent_today, 6),
+    }
+
+
 def make_handler(state: DashboardState) -> type:
     class DashboardHandler(BaseHTTPRequestHandler):
         protocol_version = "HTTP/1.1"
@@ -269,6 +342,17 @@ def make_handler(state: DashboardState) -> type:
                 from .portal import load_board
 
                 self._json(200, load_board())
+                return
+
+            if path == "/api/access":
+                # Phase 7 - the trust view: per-tier grants, the ledger tail,
+                # and the overall integrity verdict of the chain.
+                self._json(200, access_snapshot())
+                return
+
+            if path == "/api/privacy":
+                # Phase 7 - the privacy meter: local vs cloud calls + spend.
+                self._json(200, privacy_snapshot())
                 return
 
             if path == "/api/watch":
@@ -438,6 +522,14 @@ def make_handler(state: DashboardState) -> type:
                 state.cfg = cfg
                 state.agent.chain = make_brain_chain(cfg)
                 self._json(200, {"status": "saved"})
+                return
+
+            if path == "/api/access/revoke":
+                # Phase 7 - one tap kills every tier grant, instantly.
+                from . import access
+
+                access.revoke_all()
+                self._json(200, {"revoked": True})
                 return
 
             if path == "/api/license/activate":

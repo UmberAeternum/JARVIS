@@ -9,6 +9,13 @@ PAGE_BRIDGE = r"""<!DOCTYPE html>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>J.A.R.V.I.S. — Bridge</title>
+<meta name="theme-color" content="#050A12">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="JARVIS">
+<link rel="manifest" href="manifest.json">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='12' fill='%23050A12'/%3E%3Ccircle cx='32' cy='32' r='14' fill='none' stroke='%2366F0FF' stroke-width='4'/%3E%3Ccircle cx='32' cy='32' r='5' fill='%23FFB454'/%3E%3C/svg%3E">
 <style>
   :root { --bg:#050A12; --cyan:#66F0FF; --amber:#FFB454; --dim:#7FA8B8; --panel:#0E2233; }
   * { box-sizing: border-box; }
@@ -42,6 +49,10 @@ PAGE_BRIDGE = r"""<!DOCTYPE html>
   #send { background:var(--panel); color:var(--amber); border:1px solid #FFB45466;
           border-radius:8px; padding:10px 16px; cursor:pointer; font-family:inherit; }
   #send:disabled { opacity:.4; cursor:default; }
+  #brief { background:var(--panel); color:var(--cyan); border:1px solid #66F0FF66;
+           border-radius:8px; padding:10px 14px; cursor:pointer; font-family:inherit;
+           letter-spacing:1px; }
+  #brief:disabled { opacity:.4; cursor:default; }
 </style>
 </head>
 <body>
@@ -57,6 +68,7 @@ PAGE_BRIDGE = r"""<!DOCTYPE html>
   <div id="inputrow">
     <input id="input" placeholder="Command the desktop, Sir" autocomplete="off">
     <button id="send">SEND</button>
+    <button id="brief" title="The morning briefing">BRIEF</button>
   </div>
 <script>
 "use strict";
@@ -117,6 +129,19 @@ input.addEventListener("keydown", (e) => {
   if (e.key === "Enter") { const t = input.value; input.value = ""; sendCommand(t); }
 });
 
+/* Phase 7 - the morning briefing, one tap away */
+const briefBtn = document.getElementById("brief");
+briefBtn.addEventListener("click", async () => {
+  briefBtn.disabled = true;
+  try {
+    const response = await fetch("/api/briefing", {headers: auth()});
+    const data = await response.json();
+    if (data.briefing) { bubble("reply", data.briefing); }
+    else { bubble("err", "BRIEFING UNAVAILABLE"); }
+  } catch (exc) { bubble("err", "LINK DOWN: " + exc.message); }
+  briefBtn.disabled = false;
+});
+
 async function pollLoop() {
   while (true) {
     try {
@@ -152,4 +177,27 @@ pollLoop();
 </script>
 </body>
 </html>
+"""
+
+# Phase 7 - the phone companion: the Bridge installs as a PWA. Served by
+# serve.py at /manifest.json without the session token (it contains no
+# secrets - a name, colors, and display rules).
+PWA_MANIFEST = """{
+  "name": "J.A.R.V.I.S. Bridge",
+  "short_name": "JARVIS",
+  "description": "The full desktop agent, reachable from anywhere on the LAN.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#050A12",
+  "theme_color": "#050A12",
+  "icons": [
+    {
+      "src": "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='12' fill='%23050A12'/%3E%3Ccircle cx='32' cy='32' r='14' fill='none' stroke='%2366F0FF' stroke-width='4'/%3E%3Ccircle cx='32' cy='32' r='5' fill='%23FFB454'/%3E%3C/svg%3E",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ]
+}
 """

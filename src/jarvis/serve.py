@@ -15,6 +15,9 @@ Architecture:
   Timeout or refusal = denied. The gate lives in code, now across the wire.
 - One turn at a time; events are capped; conversation-only history is the
   agent's own.
+- Phase 7 (phone companion): the panel installs as a PWA (manifest served
+  token-free at /manifest.json - no secrets inside), and /api/briefing
+  brings the morning briefing to the phone.
 """
 
 from __future__ import annotations
@@ -28,7 +31,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from . import config
 from .agent import Agent
 from .brain import make_brain_chain
-from .serve_page import PAGE_BRIDGE
+from .serve_page import PAGE_BRIDGE, PWA_MANIFEST
 from .tools import default_registry
 
 DEFAULT_PORT = 8772
@@ -188,7 +191,10 @@ def make_handler(state: BridgeState) -> type:
         def do_GET(self) -> None:  # noqa: N802 - stdlib naming
             path, _, query = self.path.partition("?")
             path = path.rstrip("/") or "/"
-            if not self._authorized() and path != "/":
+            # the PWA manifest needs to load before the session token exists
+            # (the browser fetches it from the <link>, unauthenticated) - it
+            # carries no secrets, so it is served openly
+            if not self._authorized() and path not in ("/", "/manifest.json"):
                 self._send(403, b"forbidden - missing session token", "text/plain")
                 return
             if path == "/":
@@ -196,6 +202,9 @@ def make_handler(state: BridgeState) -> type:
                     self._send(403, b"bridge requires the session token", "text/plain")
                     return
                 self._send(200, PAGE_BRIDGE.encode("utf-8"), "text/html; charset=utf-8")
+                return
+            if path == "/manifest.json":
+                self._send(200, PWA_MANIFEST.encode("utf-8"), "application/manifest+json")
                 return
             if path == "/api/events":
                 since = 0
@@ -206,6 +215,17 @@ def make_handler(state: BridgeState) -> type:
                 last = events[-1]["id"] if events else since
                 self._send(200, json.dumps({"events": events, "last": last}).encode("utf-8"),
                            "application/json")
+                return
+            if path == "/api/briefing":
+                # Phase 7 - the morning briefing reaches the phone: local
+                # data only (health, kanban, memory), no brain, no key.
+                from .sentinel import compose_briefing
+
+                self._send(
+                    200,
+                    json.dumps({"briefing": compose_briefing()}).encode("utf-8"),
+                    "application/json",
+                )
                 return
             if path == "/api/status":
                 self._send(

@@ -84,6 +84,13 @@ PAGE = r"""<!doctype html>
     border-radius: 6px; padding: 7px 9px; margin-bottom: 7px; font-size: 13px;
     display: flex; justify-content: space-between; gap: 6px; align-items: center;
   }
+  #tiercards { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }
+  .tiercard { border: 1px solid rgba(0, 229, 255, 0.18); border-radius: 8px; padding: 10px; text-align: center; }
+  .tiercard.on { border-color: rgba(74, 222, 128, 0.45); }
+  .tiercard h4 { color: var(--cyan); letter-spacing: 0.2em; font-size: 11px; margin-bottom: 6px; }
+  .tiercard .state { font-size: 13px; font-weight: bold; }
+  button.act.danger { border-color: rgba(255, 107, 107, 0.6); color: var(--bad); }
+  button.act.danger:hover { background: rgba(255, 107, 107, 0.15); }
   .muted { color: var(--dim); font-size: 12px; }
   .toast {
     position: fixed; bottom: 18px; right: 18px; padding: 10px 16px;
@@ -131,6 +138,7 @@ PAGE = r"""<!doctype html>
   <button data-tab="memory">MEMORY</button>
   <button data-tab="board">BOARD</button>
   <button data-tab="watch">WATCHTOWER</button>
+  <button data-tab="trust">TRUST</button>
   <button data-tab="settings">SETTINGS</button>
 </nav>
 <div id="scanlines"></div>
@@ -209,6 +217,27 @@ PAGE = r"""<!doctype html>
     </div>
   </section>
 
+  <section id="tab-trust">
+    <div class="card">
+      <h3>ACCESS TIERS</h3>
+      <div class="muted" style="margin-bottom:8px">What the agent may reach right now. Grants expire on their own - and die instantly when you say so. New grants require the typed phrase in the CLI; this page can only take them away.</div>
+      <div id="tiercards">loading...</div>
+      <div class="row" style="align-items:center">
+        <button class="act danger" onclick="revokeAll()">REVOKE ALL</button>
+        <span id="integrity" class="chip">LEDGER: ...</span>
+      </div>
+    </div>
+    <div class="card">
+      <h3>PRIVACY METER</h3>
+      <div id="privacy" class="pre">loading...</div>
+    </div>
+    <div class="card">
+      <h3>ACTION LOG</h3>
+      <div class="muted" style="margin-bottom:8px">The tamper-evident ledger - last 20 entries, newest first, refreshed live.</div>
+      <div id="trustlog" class="pre">loading...</div>
+    </div>
+  </section>
+
   <section id="tab-settings">
     <div class="card">
       <h3>BRAIN</h3>
@@ -261,7 +290,7 @@ function api(path, body) {
 /* tabs */
 var TAB_LOADERS = {
   chat: loadSessions, health: loadHealth, memory: loadMemory,
-  board: loadBoard, watch: loadWatch, settings: loadSettings
+  board: loadBoard, watch: loadWatch, trust: loadTrust, settings: loadSettings
 };
 document.querySelectorAll("nav button").forEach(function (btn) {
   btn.addEventListener("click", function () {
@@ -555,6 +584,68 @@ function addWatch() {
 }
 function removeWatch(id) {
   api("/api/watch", { action: "remove", id: id }).then(loadWatch);
+}
+
+/* trust (Phase 7) - grants, revoke, ledger, privacy */
+var trustTimer = null;
+function loadTrust() {
+  refreshAccess();
+  refreshPrivacy();
+  if (!trustTimer) trustTimer = setInterval(function () {
+    var active = document.querySelector("main section.active");
+    if (active && active.id === "tab-trust") { refreshAccess(); refreshPrivacy(); }
+  }, 5000);
+}
+function countdown(expiresTs) {
+  var left = Math.max(0, Math.round(expiresTs - Date.now() / 1000));
+  var h = Math.floor(left / 3600), m = Math.floor((left % 3600) / 60), s = left % 60;
+  return "expires in " + (h ? h + "h " : "") + (m ? m + "m " : "") + s + "s";
+}
+function refreshAccess() {
+  api("/api/access").then(function (res) {
+    if (!res.ok) return;
+    var names = { observe: "OBSERVE", assist: "ASSIST", act: "ACT", install: "INSTALL" };
+    var cards = [];
+    Object.keys(names).forEach(function (tier) {
+      var info = (res.data.tiers || {})[tier] || {};
+      var state = info.granted
+        ? '<div class="state" style="color:var(--ok)">GRANTED</div>' +
+          '<div class="muted">' + esc(countdown(info.expires_ts || 0)) + '</div>'
+        : '<div class="state" style="color:var(--dim)">NOT GRANTED</div>' +
+          '<div class="muted">denied by default</div>';
+      cards.push('<div class="tiercard' + (info.granted ? " on" : "") + '"><h4>' + names[tier] +
+        '</h4>' + state + '</div>');
+    });
+    $("tiercards").innerHTML = cards.join("");
+    var ok = res.data.integrity === "OK";
+    var chip = $("integrity");
+    chip.textContent = "LEDGER: " + (ok ? "OK" : "TAMPERED");
+    chip.style.borderColor = ok ? "var(--ok)" : "var(--bad)";
+    chip.style.color = ok ? "var(--ok)" : "var(--bad)";
+    var rows = (res.data.log_tail || []).map(function (e) {
+      return esc(e.ts || "?") + "  " + esc(e.action) + "  [" + esc(e.actor) + "]  " +
+        esc(e.detail) + (e.integrity === "ok" ? "" : "  <<TAMPERED>>");
+    });
+    $("trustlog").textContent = rows.length ? rows.join("\n") : "The ledger is empty.";
+  });
+}
+function refreshPrivacy() {
+  api("/api/privacy").then(function (res) {
+    if (!res.ok) return;
+    var d = res.data;
+    var total = (d.local_calls || 0) + (d.cloud_calls || 0);
+    var pct = total ? Math.round((d.local_calls || 0) / total * 100) : 100;
+    $("privacy").textContent =
+      "local calls: " + (d.local_calls || 0) + " of " + total + " (" + pct + "% stayed on device)\n" +
+      "cloud calls: " + (d.cloud_calls || 0) + "\n" +
+      "spend today: $" + Number(d.spent_today || 0).toFixed(4);
+  });
+}
+function revokeAll() {
+  api("/api/access/revoke", {}).then(function (res) {
+    toast(res.ok ? "All tier grants revoked, Sir." : "Revoke failed.", !res.ok);
+    refreshAccess();
+  });
 }
 
 /* settings */

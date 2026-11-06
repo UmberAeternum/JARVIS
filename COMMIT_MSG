@@ -1,10 +1,11 @@
-Phase 6: cascade + planner mode (brain v2/v3)
+Phase 7: trust dashboard + phone companion
 
-- brain/cascade.py: cheap model first, verifier checks the reply, escalate
- on verification failure. Never downgrades privacy.
-- planner.py: plan_goal parses the brain's JSON step plan; execute_plan
- runs each step through the authorize chokepoint with per-step confirm
- for act/install tiers; every step in the ledger.
-- jarvis plan "<goal>" [--dry-run]: preview without acting.
-- Tests: escalation, privacy, plan parsing, execution, denial, dry-run.
-- Version 3.25.0.
+- Dashboard: /api/access (per-tier grants, log tail, integrity),
+  /api/access/revoke (instant), /api/privacy (local vs cloud counts,
+  spend today); TRUST tab with per-tier cards, REVOKE ALL button,
+  live action log, privacy meter.
+- Bridge: /api/briefing endpoint; PAGE_BRIDGE gains a Briefing button
+  and PWA meta tags for phone installation.
+- Tests: endpoint auth, revoke confirmation, privacy counts, briefing
+  content, no secrets in responses.
+- Version 3.26.0.
