@@ -3,11 +3,13 @@
 [![CI](https://github.com/UmberAeternum/JARVIS/actions/workflows/ci.yml/badge.svg)](https://github.com/UmberAeternum/JARVIS/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/UmberAeternum/JARVIS)](https://github.com/UmberAeternum/JARVIS/releases/latest)
 
-**The shadow that works for you.** A local-first AI assistant for your PC and your pocket — it hears you, sees your screen, remembers what you tell it, anticipates, and speaks. Built on a safety architecture where every powerful action passes a human confirmation gate.
+**The shadow that works for you.** A local-first AI assistant in the Iron Man tradition — it hears you, sees your screen, remembers everything, anticipates, speaks, and lives in every app you use. Built on a safety architecture where every powerful action passes a human gate.
 
-Six surfaces, one assistant: the desk CLI, a local web dashboard, your phone (native HUD + browser bridge panel), an avatar face, and a WebXR room for headsets — **all of them run the same full agent, with the same tools and the same gate.**
+UMBRA is one mind with many bodies: a desk CLI, a web mission control with the full agent, an always-on-top overlay beside your other apps, your phone (native HUD + browser bridge panel), an avatar face, and a WebXR room — **every surface runs the same agent, the same tools, the same gate.**
 
-UMBRA works with a **cloud brain** (Z.AI GLM, OpenAI, Google Gemini, or any OpenAI-compatible API) or a **local brain** (Ollama / LM Studio) — and can chain both with automatic failover. With a local brain it runs **fully offline**: chat, memory, tools, dashboard, all of it.
+It works with a **cloud brain** (Z.AI GLM, OpenAI, Google Gemini, or any OpenAI-compatible API) or a **local brain** (Ollama / LM Studio) — chained with automatic failover if you configure both. With a local brain it runs **fully offline**: chat, memory, tools, dashboard, all of it.
+
+> **No holograms.** UMBRA is software — windows, panels, voices and code. Nothing here projects into physical space, and nothing here claims to.
 
 ## Two editions
 
@@ -18,21 +20,25 @@ UMBRA works with a **cloud brain** (Z.AI GLM, OpenAI, Google Gemini, or any Open
 | Reminders + morning briefing | ✓ | ✓ |
 | `/look` screenshots | ✓ | ✓ |
 | Avatar (web face) | ✓ | ✓ |
-| **Dashboard** — full agent + streamed replies + spoken answers + session resume | ✓ | ✓ |
+| **Dashboard** — full agent + streamed replies + spoken answers + HUD rings + session resume | ✓ | ✓ |
 | Session history — searchable, resumable, on every surface | ✓ | ✓ |
+| **App injection** — local API + overlay + plugin scaffolds | ✓ | ✓ |
 | Profiles + export/import | ✓ | ✓ |
 | Signed update checker + redacted diagnostics | ✓ | ✓ |
+| Personality pack (honorific, verbosity, humor) | ✓ | ✓ |
 | `/live` screen sharing | — | ✓ |
 | **Bridge** — full agent + session history on your phone | — | ✓ |
 | **Portal** — WebXR room for headsets | — | ✓ |
 | **Screen control** — click/type/scroll | — | ✓ |
 | **Watchtower** — ambient rules | — | ✓ |
 
-## Install (LITE — free)
+## Install
 
-**No Python?** Grab the standalone [UMBRA.exe from the latest release](https://github.com/UmberAeternum/JARVIS/releases/latest) — double-click and the setup wizard handles the rest. Verify the download with the attached `SHA256SUMS`.
+**Windows (standalone, no Python):** grab [UMBRA.exe from the latest release](https://github.com/UmberAeternum/JARVIS/releases/latest), double-click, and the setup wizard handles the rest. Verify with the attached `SHA256SUMS`.
 
-From source, requires Python 3.10+:
+**Android:** sideload the [launcher APK](https://github.com/UmberAeternum/jarvis-launcher/releases) and set it as home.
+
+**From source** (Python 3.10+):
 
 ```bash
 git clone https://github.com/UmberAeternum/JARVIS.git
@@ -41,106 +47,70 @@ pip install .
 umbra        # or: python -m jarvis
 ```
 
-The setup wizard walks you through the brain: pick a provider, paste your API key (validated live), optional voice, optional PRO activation — done. Re-run it any time with `jarvis setup` (non-interactive for CI: `jarvis setup --yes --provider zai --api-key ...`, or `--local` for Ollama). Inspect or change settings later with `jarvis settings show | set <key>=<value> | reset`. Updates: `jarvis update check` verifies a signed release manifest and prints release notes + URL — report-only, nothing is ever auto-installed (disable the startup check with `jarvis settings set updates.check_on_start=false`). Keys and all data stay on your machine.
-
-Optional extras: `pip install ".[all]"` — voice, vision, screen control deps, keychain storage.
-
-## PRO
-
-PRO features are unlocked by a signed license key:
+**On another device — injection, one command from your PC:**
 
 ```bash
-jarvis license activate UMBRA-xxxx.yyyy
-jarvis license status
-```
-
-Keys are Ed25519-signed by the publisher — they cannot be forged, and they never leave your machine after activation. See the EULA (`LICENSE`) for terms.
-
-## Profiles
-
-UMBRA supports isolated profiles — each with its own brain config, memories, conversations, health data and license. Your existing data is the `default` profile; nothing moves or migrates.
-
-```bash
-jarvis profile list                 # see profiles, active one marked
-jarvis profile create work
-jarvis profile use work             # switch; first run there starts the wizard
-jarvis profile delete work
-```
-
-Move data between machines or profiles:
-
-```bash
-jarvis export --out backup.json     # secrets excluded by default
-jarvis export --include-secrets     # requires confirmation; the file holds plaintext keys
-jarvis import backup.json           # restores into the active profile (merge, never destroy)
-```
-
-## App injection
-
-UMBRA can live inside your other tools, not just its own console:
-
-- **Local API** — `jarvis serve --api` exposes a token-authenticated JSON API on 127.0.0.1: `GET /health`, `GET /tools`, `POST /chat`. Rotate the token with `jarvis api token rotate` (shown once), view a masked reminder with `jarvis api token show`.
-- **Overlay** — `jarvis overlay` floats an always-on-top companion beside any app: live API status, last reply, and a query box. `--attach <process>` tags your questions with the app you're working in; `--clickthrough` makes the window pure display.
-- **Scaffolds** — `jarvis plugin scaffold vscode --out <dir>` and `jarvis plugin scaffold browser --out <dir>` generate minimal starter extensions that call the API. No auto-install, no store publishing, no token embedded in generated files.
-
-Gated tools (the kind that need a human yes/no) are auto-denied over the API — use the dashboard or the Bridge for interactive approvals.
-
-## Device injection
-
-One command puts UMBRA on another machine — no manual steps on the target:
-
-```bash
-jarvis inject scan                                   # sweep the LAN, guess OS + feasibility
-jarvis inject install --target 192.168.1.50 --os linux --dry-run
+jarvis inject scan                                    # sweep the LAN, guess OS
 jarvis inject install --target 192.168.1.50 --os linux --yes
 jarvis inject install --target <adb-device> --os android --apk UMBRA-launcher-*.apk
-jarvis inject bundle --out umbra-inject-bundle.zip   # offline installer: wheel + scripts + public key
+jarvis inject bundle --out umbra-inject-bundle.zip    # offline installer for anything else
 ```
 
-Windows and Linux targets install over SSH (keys/agent only — passwords are never asked for or stored); Android via `adb`. Root/admin targets are refused without `--i-know`, the bundle never contains private material, and `--dry-run` prints the exact plan with zero network calls. Thin wrappers: `scripts/inject.sh`, `scripts/inject.ps1`.
+SSH keys/agent only — passwords are never asked for or stored; the bundle never contains private material. Thin wrappers: `scripts/inject.sh`, `scripts/inject.ps1`.
 
-## The bodies
+The setup wizard walks you through the brain: pick a provider, paste your API key (validated live), optional voice, optional PRO activation. Re-run anytime with `jarvis setup` (`--yes` for CI, `--local` for Ollama). Optional extras: `pip install ".[all]"`.
 
-| Surface | Command |
-|---|---|
-| Desktop CLI (all tools, confirmations) | `umbra` / `jarvis` / `python -m jarvis` |
-| Phone HUD ([launcher repo](https://github.com/UmberAeternum/jarvis-launcher)) | APK from releases; DESK ⌁ = full agent over the LAN + streamed replies + session history |
-| Avatar (web face with lip sync) | `jarvis face` |
-| **Dashboard** (local web mission control: **full agent** with tools + in-browser APPROVE/DENY, streamed replies, spoken answers, session resume, Oracle, memory, kanban, watchtower, settings) | `jarvis dashboard` |
-| Portal (WebXR room for headsets: **full agent**, streamed replies, APPROVE/DENY, kanban wall, BYO models) | `jarvis portal` |
-| Sentinel (proactive daemon) | `jarvis sentinel` |
-| The Oracle (health report) | `jarvis health` |
-| Diagnostics (redacted support bundle) | `jarvis diagnostics bundle` |
+## App injection — UMBRA inside your other apps
+
+- **Local API** — `jarvis serve --api`: a token-authenticated JSON API on 127.0.0.1 (`/health`, `/tools`, `/chat`). Rotate the token with `jarvis api token rotate`.
+- **Overlay** — `jarvis overlay`: an always-on-top companion beside any app — live status, query box, last reply. `--attach <process>` adds working context; `--clickthrough` makes it display-only.
+- **Scaffolds** — `jarvis plugin scaffold vscode --out <dir>` / `scaffold browser --out <dir>`: minimal starter extensions that call the API. No auto-install, no store publishing, no token in generated files.
+
+Gated tools are auto-denied over the API — approvals live in the dashboard and Bridge.
+
+## Living presence
+
+- **Wake word** — `jarvis wake`: hands-free, configurable phrase (`jarvis settings set voice.wake_phrase "Hey UMBRA"` — the default), push-to-talk fallback, strictly opt-in.
+- **Ambient nudges** — low battery, due reminders, health shifts: one concise line, rate-limited (default 1 per 5 min), quiet hours (23:00–07:00), **default OFF**. Enable: `jarvis settings set ambient.nudges=true`.
+- **Personality** — `jarvis personality set --honorific Sir --verbosity concise --humor 5 --proactive 1`: the dry-butler register, yours to tune.
+- **Morning briefing** — `jarvis sentinel`: health, board, memory and reminders, spoken.
+- **Voice identity** — `jarvis voice set jarvis`: the British-butler TTS profile (silent fallback when no matching voice exists).
 
 ## Command reference
 
 | Command | What it does |
 |---|---|
 | `umbra` / `python -m jarvis` | The assistant — chat with all tools, confirmations, streaming |
-| `jarvis dashboard` | Local web mission control (full agent, streaming, SPEAK, resume) |
-| `jarvis setup` | Onboarding wizard — `--yes` for CI scripting, `--local` for Ollama |
-| `jarvis settings show / set / reset` | Inspect and change configuration (secrets always masked) |
-| `jarvis profile list / create / use / delete` | Isolated identities, each with its own data |
+| `jarvis dashboard` | Local web mission control (full agent, streaming, SPEAK, HUD, resume) |
+| `jarvis serve` / `jarvis serve --api` | PRO: Bridge over your LAN · LITE: local JSON API for other apps |
+| `jarvis overlay` | Always-on-top companion window (`--attach`, `--clickthrough`) |
+| `jarvis plugin scaffold vscode\|browser` | App-injection starters |
+| `jarvis inject scan / install / bundle` | Put UMBRA on another device |
+| `jarvis setup` | Onboarding wizard (`--yes` for CI, `--local` for Ollama) |
+| `jarvis settings show / set / reset` | Configuration (secrets always masked) |
+| `jarvis profile list / create / use / delete` | Isolated identities |
 | `jarvis export` / `jarvis import` | Move data between machines or profiles |
-| `jarvis update check` | Look for a newer signed release (report-only) |
-| `jarvis diagnostics bundle` | Redacted support bundle to attach to requests |
-| `jarvis health` | The Oracle: HR/HRV risk screening |
-| `jarvis sentinel` | Reminders + spoken morning briefing daemon |
-| `jarvis face` / `jarvis portal` | Avatar face · WebXR room (portal: PRO) |
-| `jarvis serve` | PRO: the Bridge — full agent + history over your LAN |
-| `jarvis watch` / `jarvis wake` | Ambient screen observation · hands-free voice |
+| `jarvis wake` | Hands-free wake-word mode |
+| `jarvis personality show / set` | Honorific, verbosity, humor, proactivity |
+| `jarvis voice show / set` / `jarvis hud show / theme` | TTS profile · HUD theme |
+| `jarvis intro` | The 10-second boot sequence (`--no-audio` works) |
+| `jarvis update check` | Newer signed release lookup (report-only) |
+| `jarvis diagnostics bundle` | Redacted support bundle |
+| `jarvis health` / `jarvis sentinel` | The Oracle · reminders + briefing daemon |
+| `jarvis face` / `jarvis portal` | Avatar · WebXR room (portal: PRO) |
 | `jarvis license activate / status` | PRO licensing |
 
 ## Security model
 
 - **Bring your own key.** No API key ships with this software; keys are stored encrypted on-device and only sent to the provider you configure.
-- **The gate lives in code, not prompts.** Dangerous actions trigger an interactive confirmation — including remotely, over the Bridge, as APPROVE/DENY on your phone.
-- **Argument-list execution only.** No shell ever parses model-generated text.
+- **The gate lives in code, not prompts.** Dangerous actions trigger an interactive confirmation — in the CLI, on the dashboard, on your phone, in the room.
+- **Argument-list execution only.** No shell ever parses model-generated text; injection targets are regex-validated and remote commands are constants.
+- **Loopback is the default.** The API binds 127.0.0.1 with a rotating token; the LAN Bridge is a separate, PRO-gated, token-gated command.
 - **Outbound URLs are guarded** (scheme, host, resolved-IP, no redirects). Local-first everywhere else.
 
 ## Privacy
 
-Local-first: license, memories, health samples, reminders and voice transcription are stored on your device. Only your AI-provider traffic leaves the machine, using your own key. Diagnostics bundles are built locally and fully redacted (no keys, no message bodies unless you explicitly pass `--include-conversations`); crash reports are opt-in (`jarvis settings set diagnostics.crash_reports=true`) and never leave the machine.
+Local-first: license, memories, health samples, reminders, voice transcription and conversations are stored on your device. Only your AI-provider traffic leaves the machine, using your own key. Diagnostics bundles are built locally and fully redacted (no keys, no message bodies unless you explicitly pass `--include-conversations`); crash reports are opt-in and never leave the machine; the offline bundle contains the public key only — never private material.
 
 ## Health disclaimer
 

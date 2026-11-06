@@ -106,7 +106,7 @@ class FakeBrain:
 
 
 def version_string() -> None:
-    expect(__version__ == "3.16.0", __version__)
+    expect(__version__ == "3.17.0", __version__)
 
 
 def registry_built() -> None:

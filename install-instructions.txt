@@ -66,6 +66,15 @@ EVERYDAY COMMANDS
                           nothing installs itself)
   jarvis health           the Oracle: HR/HRV risk screening
   jarvis sentinel         proactive daemon: reminders + morning briefing
+  jarvis wake             hands-free: say the wake phrase (default
+                          "Hey UMBRA", configurable: voice.wake_phrase)
+  jarvis personality show | set
+                          the register: honorific, verbosity, humor,
+                          proactivity (default: the dry-butler "Sir")
+  jarvis voice set jarvis British-butler TTS profile (silent fallback)
+  jarvis hud theme hologram|minimal
+                          dashboard HUD look
+  jarvis intro            the 10-second boot sequence (--no-audio works)
   jarvis face             avatar (web face)      jarvis portal: WebXR room
   jarvis serve            PRO: full agent over the LAN (phone control)
   jarvis diagnostics bundle
@@ -90,8 +99,9 @@ EVERYDAY COMMANDS
 LITE vs PRO
 --------------------------------------------------------------------
 LITE (free): chat, voice, memory, reminders + briefing, Health Oracle,
-/look screenshots, avatar, dashboard, profiles, export/import, update
-checker, diagnostics.
+/look screenshots, avatar, dashboard (full agent + streaming + speech),
+app injection (local API + overlay + scaffolds), session history,
+profiles, export/import, update checker, diagnostics, personality pack.
 
 PRO (license key): everything above PLUS live screen sharing, the LAN
 Bridge (phone control), the WebXR Portal, screen control, and the

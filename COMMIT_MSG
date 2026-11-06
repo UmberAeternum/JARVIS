@@ -1,29 +1,22 @@
-Mark XXIX: Iron Man HUD polish + voice identity
+Mark XXX: README rewrite + release docs (capstone)
 
-- HUD config (HudConfig - additive, schema stays v4): theme
-  (hologram | minimal), sound cues, typed reply effect, boot sequence -
-  all pure presentation with hologram defaults. settings show/set cover
-  every hud key.
-- Dashboard: /api/state now carries a "hud" dict; new /api/vitals
-  endpoint (CPU/RAM/battery via watchtower.read_vitals + license tier)
-  behind the existing confirm-free JSON paths. PAGE gains scanlines,
-  a boot overlay ("SYSTEMS ONLINE", removable per hud.boot), status
-  rings (conic-gradient, 10 s refresh), typed-out replies with the
-  plain path kept for ERROR lines, subtle WebAudio cues, and a
-  hologram/minimal theme toggle. All additive JS in the raw PAGE
-  string (compiles clean under -W error::SyntaxWarning).
-- Voice identity: voice.profile ("" = system default, "jarvis" =
-  British butler). _apply_jarvis_voice is best-effort - prefers an
-  en-GB SAPI voice (Hazel/George), slightly reduced rate, silent
-  fallback when no matching voice exists; the spoken text path never
-  depends on a matching voice. jarvis voice show/set with strict
-  validation.
-- Boot sequence (intro.py, pure presentation): 13 staged HUD lines,
-  optional spoken bookend ("System online, Sir."), Enter/Ctrl+C skips
-  to the end, EOF stdin (pipelines/CI) never truncates it, --no-audio
-  removes the TTS dependency entirely. Always exits 0.
-- Tests: hud + voice-profile config round-trip with safe defaults;
-  intro exit 0 with the full sequence (stage_s=0); speak() graceful
-  without any TTS stack; /api/vitals + /api/state hud round-trip on a
-  live 127.0.0.1 server. Suite is now 72 checks.
-- Version 3.16.0.
+- README.md fully rewritten for the finished product: the tagline states
+  the one-mind-many-bodies story and adds the explicit "No holograms"
+  callout; the editions table now lists app injection, the personality
+  pack and HUD rings in LITE; Install is reorganized (standalone exe
+  first, Android APK, source, then the one-command device-injection
+  block); App injection and Device injection are consolidated into
+  tighter sections; a new "Living presence" section covers wake word,
+  ambient nudges (default OFF, rate-limited, quiet hours), personality,
+  briefing and the voice identity; the command reference table covers
+  every surface (serve/overlay/scaffolds/inject/wake/personality/voice/
+  hud/intro); the security model gains loopback-by-default and
+  constant-remote-commands lines; Privacy mentions the offline bundle
+  carrying the public key only.
+- docs/index.html: THE BODIES grid gains INJECTION and PRESENCE cards;
+  install copy notes the fully local Ollama brain.
+- install-instructions.txt: everyday commands gain wake, personality,
+  voice set jarvis, hud theme and intro; the LITE column now lists app
+  injection, session history and the personality pack.
+- Docs + release mark: no code changes, suite stays 72 checks.
+- Version 3.17.0.
