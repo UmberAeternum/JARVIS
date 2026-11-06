@@ -107,6 +107,20 @@ Gated tools are auto-denied over the API — approvals live in the dashboard and
 - **Argument-list execution only.** No shell ever parses model-generated text; injection targets are regex-validated and remote commands are constants.
 - **Loopback is the default.** The API binds 127.0.0.1 with a rotating token; the LAN Bridge is a separate, PRO-gated, token-gated command.
 - **Outbound URLs are guarded** (scheme, host, resolved-IP, no redirects). Local-first everywhere else.
+- **Zero reach by default.** Device installs and cross-app reach require an interactive, expiring, logged grant — and a per-target confirmation even then. No self-propagation, ever (test-enforced).
+
+## The EDITH protocol (reach, consented)
+
+UMBRA's reach — installing itself onto another device, cross-app attachment, the API's tool endpoints — is **denied by default**. It unlocks only when you type the confirmation phrase interactively:
+
+```bash
+jarvis access grant --full     # expires in 24h, logged with a device fingerprint
+jarvis access status           # FULL ACCESS: granted | not granted
+jarvis access log              # append-only, tamper-evident ledger
+jarvis access revoke --all     # take off the glasses - instant
+```
+
+Even with full access, every device install asks again for the specific target at the moment of install. **No autonomous self-propagation**: a scan sees devices and installs nothing; nothing installs except in response to your explicit command. This is test-enforced.
 
 ## Privacy
 
@@ -124,7 +138,7 @@ The Oracle is an informational heuristic against your own recorded baseline. It 
 
 ## Support
 
-Troubleshooting, log locations, diagnostics bundles, and the support/refund policy: [SUPPORT.md](SUPPORT.md).
+Troubleshooting, log locations, diagnostics bundles, and the support/refund policy: [SUPPORT.md](SUPPORT.md). Legal: [PRIVACY.md](PRIVACY.md) · [REFUND.md](REFUND.md).
 
 ## License
 

@@ -106,7 +106,7 @@ class FakeBrain:
 
 
 def version_string() -> None:
-    expect(__version__ == "3.18.0", __version__)
+    expect(__version__ == "3.19.0", __version__)
 
 
 def registry_built() -> None:
@@ -2727,6 +2727,154 @@ def edith_protocol(tmp: Path) -> None:
         config.config_dir = original
 
 
+def ga_hardening(tmp: Path) -> None:
+    """Mark XXXI - GA hardening: license limits, update apply, payhub."""
+    import base64
+    import hashlib
+    import hmac as hmac_mod
+    import json as jsonlib
+    import os as os_mod
+    import time as time_mod
+    import zipfile as zfmod
+
+    from cryptography.hazmat.primitives import serialization
+
+    from jarvis import ga, licensing
+    from jarvis.updates import canonical_payload_bytes, verify_manifest
+
+    original = config.config_dir
+    config.config_dir = lambda: tmp / "cfgga"
+    try:
+        signer = Ed25519PrivateKey.generate()
+        licensing_saved = licensing.PUBLIC_KEY_B64
+        licensing.PUBLIC_KEY_B64 = base64.b64encode(
+            signer.public_key().public_bytes(
+                serialization.Encoding.Raw, serialization.PublicFormat.Raw
+            )
+        ).decode()
+
+        def make_key(payload: dict) -> str:
+            raw = jsonlib.dumps(payload).encode()
+            sig = signer.sign(raw)
+            return ("UMBRA-"
+                    + base64.urlsafe_b64encode(raw).decode().rstrip("=")
+                    + "."
+                    + base64.urlsafe_b64encode(sig).decode().rstrip("="))
+
+        # expiry: an expired key is invalid
+        payload, reason = licensing.validate_license(
+            make_key({"name": "T", "tier": "pro", "exp": "2020-01-01"}))
+        expect(payload is None and "expired" in (reason or ""), reason)
+
+        # device binding: a key pinned elsewhere is invalid here
+        payload, reason = licensing.validate_license(
+            make_key({"name": "T", "tier": "pro", "device_id": "other-machine"}))
+        expect(payload is None and "different device" in (reason or ""), reason)
+
+        # revocation: a key listed in revoked.txt is refused at validation
+        key_ok = make_key({"name": "T", "tier": "pro"})
+        ok, message = licensing.install_license(key_ok)
+        expect(ok, message)
+        (tmp / "cfgga" / "revoked.txt").write_text(
+            licensing._key_digest(key_ok) + "\n", encoding="utf-8")
+        payload, reason = licensing.validate_license(key_ok)
+        expect(payload is None and "revoked" in (reason or ""), reason)
+        expect(licensing.tier() == "lite", "revoked license must fall back to lite")
+
+        # max_devices: the third distinct device is refused at activation
+        import jarvis.access as access_mod
+
+        key_md = make_key({"name": "T", "tier": "pro", "max_devices": 2})
+        saved_fp = access_mod.device_fingerprint
+        refusals = 0
+        try:
+            for fingerprint in ("fp-one", "fp-two", "fp-three"):
+                access_mod.device_fingerprint = (lambda fp=fingerprint: fp)
+                ok, message = licensing.install_license(key_md)
+                if not ok:
+                    refusals += 1
+            expect(refusals == 1 and "device limit" in message, f"max_devices: {message}")
+        finally:
+            access_mod.device_fingerprint = saved_fp
+
+        # the max_devices section left a valid key installed - remove it so the
+        # trial assertions below see tier() from the trial alone
+        (tmp / "cfgga" / "license.key").unlink(missing_ok=True)
+
+        # trial: starts once, refuses a second start, expiry falls back to lite
+        ok, message = licensing.start_trial()
+        expect(ok and "7 days" in message, message)
+        expect(licensing.tier() == "pro", "trial must grant pro")
+        ok2, message2 = licensing.start_trial()
+        expect(not ok2 and "already running" in message2, message2)
+        trial_state = jsonlib.loads(
+            (tmp / "cfgga" / "trial.json").read_text(encoding="utf-8"))
+        trial_state["expires_ts"] = time_mod.time() - 1
+        (tmp / "cfgga" / "trial.json").write_text(
+            jsonlib.dumps(trial_state), encoding="utf-8")
+        expect(licensing.tier() == "lite", "expired trial must fall back to lite")
+
+        # update apply: signature + hash verified, installer invoked
+        wheel_bytes = b"PK\x03\x04-fake-wheel-for-tests"
+        payload = {"version": "9.9.9", "wheel_url": "https://example.com/w.whl",
+                   "sha256": hashlib.sha256(wheel_bytes).hexdigest()}
+        manifest = {"payload": payload,
+                    "signature": base64.b64encode(
+                        signer.sign(canonical_payload_bytes(payload))).decode()}
+        expect(verify_manifest(manifest), "manifest must verify")
+        installed: list = []
+        ok, message = ga.apply_update(
+            manifest, "3.19.0",
+            fetch=lambda url: wheel_bytes,
+            installer=lambda wheel_path: installed.append(str(wheel_path)) or True,
+        )
+        expect(ok and "9.9.9" in message, message)
+        expect(len(installed) == 1, "installer not called")
+        # same signature, changed payload: the hash still matches the wheel,
+        # so only signature verification can refuse this
+        tampered = {"payload": dict(payload,
+                                    wheel_url="https://evil.example.com/w.whl"),
+                    "signature": manifest["signature"]}
+        ok2, message2 = ga.apply_update(
+            tampered, "3.19.0",
+            fetch=lambda url: wheel_bytes,
+            installer=lambda p: True,
+        )
+        expect(not ok2 and "signature" in message2, message2)
+        bad_payload = {"version": "9.9.9", "wheel_url": "https://example.com/w.whl",
+                       "sha256": "0" * 64}
+        bad_manifest = {"payload": bad_payload,
+                        "signature": base64.b64encode(
+                            signer.sign(canonical_payload_bytes(bad_payload))).decode()}
+        ok3, message3 = ga.apply_update(
+            bad_manifest, "3.19.0",
+            fetch=lambda url: wheel_bytes,
+            installer=lambda p: True,
+        )
+        expect(not ok3 and "hash mismatch" in message3, message3)
+
+        # payhub: valid HMAC queued, invalid refused, mark-sent works
+        secret = "test-secret-0123456789"
+        os_mod.environ["UMBRA_PAYHUB_SECRET"] = secret
+        try:
+            body = jsonlib.dumps({"email": "buyer@example.com",
+                                  "product_name": "UMBRA PRO"}).encode()
+            good_sig = hmac_mod.new(secret.encode(), body, hashlib.sha256).hexdigest()
+            expect(ga._verify_signature(body, good_sig), "valid HMAC must verify")
+            expect(not ga._verify_signature(body, "0" * 64), "invalid HMAC must refuse")
+            expect(not ga._verify_signature(body, ""), "missing HMAC must refuse")
+            ga.queue_payment({"ts": "t", "source": "test", "email": "buyer@example.com",
+                              "product": "UMBRA PRO", "sent": False})
+            queue = ga.read_queue()
+            expect(len(queue) == 1 and queue[0]["email"] == "buyer@example.com", queue)
+            expect(ga.mark_sent(0) and ga.read_queue()[0]["sent"] is True, "mark-sent")
+        finally:
+            os_mod.environ.pop("UMBRA_PAYHUB_SECRET", None)
+        licensing.PUBLIC_KEY_B64 = licensing_saved
+    finally:
+        config.config_dir = original
+
+
 def main() -> int:
     check("version string", version_string)
     check("registry builds with 22 tools", registry_built)
@@ -2801,6 +2949,7 @@ def main() -> int:
     check("presence: wake + ambient + personality", lambda: presence_wake_ambient_personality(tmp_path))
     check("hud + voice profile + intro", lambda: hud_voice_intro(tmp_path))
     check("EDITH protocol", lambda: edith_protocol(tmp_path))
+    check("GA hardening", lambda: ga_hardening(tmp_path))
 
     check("BrainChain failover", chain_failover)
     check("BrainChain non-transient raises", chain_non_transient_raises)

@@ -948,34 +948,103 @@ def _dispatch(argv: list[str] | None = None) -> int:
     if argv and argv[0] == "update":
         from .updates import check_for_update
 
-        if (argv[1] if len(argv) > 1 else "check") != "check":
-            console.print("usage: jarvis update check")
-            return 1
-        # LITE feature: report-only, nothing is ever downloaded automatically
-        result = check_for_update(__version__)
-        if result.get("update_available"):
-            lines = [
-                f"A new version is available: [bold cyan]{result['latest']}[/] "
-                f"(you are on {__version__})",
-            ]
-            if result.get("notes"):
-                lines += ["", result["notes"]]
-            lines += [
-                "",
-                f"Release: {result.get('url', '(no url)')}",
-            ]
-            if result.get("pro_url"):
-                lines.append(f"PRO asset: {result['pro_url']}")
-            lines += [
-                "",
-                "Upgrade: [bold]pip install --upgrade jarvis-ai[/] or fetch it from the release page.",
-            ]
-            console.print(Panel("\n".join(lines), title="UPDATE AVAILABLE", border_style="amber"))
-        else:
-            console.print(
-                f"[dim]Update check: {result.get('reason', 'no update')} (current: {__version__})[/]"
-            )
-        return 0
+        action = argv[1] if len(argv) > 1 else "check"
+        if action == "check":
+            # LITE feature: report-only, nothing is ever downloaded automatically
+            result = check_for_update(__version__)
+            if result.get("update_available"):
+                lines = [
+                    f"A new version is available: [bold cyan]{result['latest']}[/] "
+                    f"(you are on {__version__})",
+                ]
+                if result.get("notes"):
+                    lines += ["", result["notes"]]
+                lines += [
+                    "",
+                    f"Release: {result.get('url', '(no url)')}",
+                ]
+                if result.get("pro_url"):
+                    lines.append(f"PRO asset: {result['pro_url']}")
+                lines += [
+                    "",
+                    "Apply it with [bold]jarvis update apply[/] (signature + hash verified),",
+                    "or upgrade manually: [bold]pip install --upgrade jarvis-ai[/].",
+                ]
+                console.print(Panel("\n".join(lines), title="UPDATE AVAILABLE", border_style="amber"))
+            else:
+                console.print(
+                    f"[dim]Update check: {result.get('reason', 'no update')} (current: {__version__})[/]"
+                )
+            return 0
+        if action == "apply":
+            from .ga import apply_update
+            from .updates import check_for_update
+
+            result = check_for_update(__version__)
+            if not result.get("update_available"):
+                console.print(f"[dim]{result.get('reason', 'no update')} - nothing to apply.[/]")
+                return 0
+            from .updates import DEFAULT_MANIFEST_URL
+
+            manifest_url = result.get("manifest_url") or DEFAULT_MANIFEST_URL
+            from . import safety
+
+            try:
+                raw, reason = safety.guarded_fetch_bytes(manifest_url, 64 * 1024, timeout=10.0)
+            except Exception as exc:
+                console.print(f"[red]manifest fetch failed: {exc}[/]")
+                return 1
+            import json as jsonlib
+
+            manifest = jsonlib.loads((raw or b"{}").decode("utf-8"))
+            ok, message = apply_update(manifest, __version__)
+            console.print(f"[{'green' if ok else 'red'}]{message}[/]")
+            return 0 if ok else 1
+        if action == "rollback":
+            from .ga import rollback_update
+
+            ok, message = rollback_update()
+            console.print(f"[{'green' if ok else 'red'}]{message}[/]")
+            return 0 if ok else 1
+        console.print("usage: jarvis update check | apply | rollback")
+        return 1
+    if argv and argv[0] == "payhub":
+        from .ga import mark_sent, read_queue
+
+        sub = argv[1] if len(argv) > 1 else "list"
+        if sub == "serve":
+            from .ga import run_payhub
+
+            return run_payhub(console, argv[2:])
+        if sub == "list":
+            entries = read_queue()
+            if not entries:
+                console.print("[dim]The payment queue is empty.[/]")
+                return 0
+            for index, entry in enumerate(entries):
+                flag = " [green]sent[/]" if entry.get("sent") else " [yellow]pending[/]"
+                console.print(
+                    f"  #{index} {entry.get('ts', '?')} {entry.get('source', '?')} "
+                    f"{entry.get('email', '?')} {entry.get('product', '')}{flag}"
+                )
+            return 0
+        if sub == "mark-sent":
+            if len(argv) < 3 or not argv[2].isdigit():
+                console.print("usage: jarvis payhub mark-sent <index>")
+                return 1
+            console.print("[green]marked sent[/]" if mark_sent(int(argv[2])) else "[red]no such entry[/]")
+            return 0
+        console.print("usage: jarvis payhub serve | list | mark-sent <index>")
+        return 1
+    if argv and argv[0] == "license":
+        sub = argv[1] if len(argv) > 1 else ""
+        if sub == "trial":
+            from .licensing import start_trial
+
+            ok, message = start_trial()
+            console.print(f"[{'green' if ok else 'yellow'}]{message}[/]")
+            return 0 if ok else 1
+        return _license_command(console, argv[1:])
     if argv and argv[0] == "setup":
         from .wizard import run_wizard, setup_noninteractive
 

@@ -1,30 +1,33 @@
-Mark XXXI (part 1): the EDITH protocol - grants, ledger, revocation
+Mark XXXI (part 2): GA hardening - licensing, updates, payments, hygiene
 
-Default state = ZERO reach. Every reach capability is denied until the
-user interactively types "I grant UMBRA full access".
+The ship-blocking gate. Every item adds a control with its test.
 
-- access.py: the grant lives in access-state.json with a device
-  fingerprint and a hard expiry (config access.window_hours, default 24h)
-  - it must be re-granted after expiry and never matches another machine.
-  Created ONLY by jarvis access grant --full with the typed confirmation
-  phrase - never by config files, env vars, CLI flags, API calls, or
-  automation. require_full() gates every reach capability and logs the
-  attempt either way.
-- Tamper-evident ledger: access-log.jsonl with chained SHA-256 entries;
-  jarvis access log prints it with integrity verdicts; jarvis access
-  status / revoke --all complete the surface.
-- Gates wired: jarvis inject install refuses without the grant (--dry-run
-  stays available: it is read-only planning with zero reach) and demands
-  a per-target confirmation even under full access; jarvis serve --api
-  serves read-only /health without the grant and requires it for /tools
-  and /chat (each authorized turn lands in the ledger); jarvis overlay
-  --attach refuses without it.
-- Hard prohibitions, test-enforced: scan alone performs ZERO installs;
-  wrong phrases, expired grants, foreign fingerprints, and tampered
-  ledger entries are all refused or detected.
-- Barge-in (Mark XXVII item): while speaking, the mic is monitored and
-  the user talking over the reply stops the speech (pure detector
-  _barge_triggered + monitor thread; silent degradation without a mic).
-- Briefing continuity: the morning briefing recaps the most recent
-  recorded session (title + turns).
-- Version 3.18.0.
+- Licensing hardening: payload fields device_id (key bound to a device
+  fingerprint), max_devices (activation-time device counting, honest
+  per-machine scope documented), exp (already present), and a revocation
+  list (revoked.txt holding sha256 digests or full keys, checked at
+  validation AND runtime). jarvis license trial: a local 7-day PRO trial
+  with fingerprint reset-detection - documented as local-trust.
+- Signed auto-update: jarvis update apply downloads the wheel named in
+  the verified manifest (wheel_url + sha256 payload fields), checks the
+  hash before install, stages, and installs via the audited argv runner;
+  the previous version is recorded for jarvis update rollback.
+  Signature/hash failures refuse the install.
+- Payment queue: jarvis payhub serve (webhook receiver, HMAC-SHA256
+  verified against UMBRA_PAYHUB_SECRET from the environment, loopback
+  by default) + list + mark-sent. Payments queue locally; keys are
+  minted OFFLINE - no private key, no email credentials in code.
+- Code signing: scripts/release.py --sign gates on UMBRA_SIGN_CERT;
+  without a certificate the build is recorded UNSIGNED in the checklist
+  and SUPPORT.md documents the TODO.
+- Secret hygiene: gitleaks in CI (full history), scripts/pre-commit
+  hook (blocks commits containing key material), and the existing
+  wheel/bundle scans.
+- Legal: PRIVACY.md (local-first data inventory, GDPR/DPDP baseline)
+  and REFUND.md (14-day promise, process, non-refundables), linked
+  from the README and the storefront footer.
+- Tests: expiry, device binding, revocation, max_devices refusal,
+  trial lifecycle; update apply verify/tamper/hash-mismatch refusals +
+  installer invocation; payhub HMAC valid/invalid/missing, queue,
+  mark-sent.
+- Version 3.19.0.

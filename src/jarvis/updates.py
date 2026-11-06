@@ -103,13 +103,15 @@ def check_for_update(
     if not latest:
         return {"update_available": False, "reason": "manifest has no version"}
     if not is_newer(current_version, latest):
-        return {"update_available": False, "reason": "up to date", "latest": latest}
+        return {"update_available": False, "reason": "up to date", "latest": latest,
+                "manifest_url": url}
     result = {
         "update_available": True,
         "latest": latest,
         "notes": str(payload.get("notes", "")),
         "url": str(payload.get("url", "")),
         "channel": channel,
+        "manifest_url": url,
     }
     if licensing.tier() == "pro" and payload.get("pro_url"):
         result["pro_url"] = str(payload["pro_url"])

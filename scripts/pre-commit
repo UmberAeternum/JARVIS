@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+# UMBRA pre-commit secret scan (Mark XXXI - GA hardening).
+# Install once:  git config core.hooksPath scripts/githooks
+# (then place/copy this file as scripts/githooks/pre-commit, or symlink).
+# Scans staged files for key material; blocks the commit on any hit.
+set -e
+FILES=$(git diff --cached --name-only --diff-filter=ACM)
+if [ -z "$FILES" ]; then
+  exit 0
+fi
+HITS=$(grep -n -E "BEGIN (RSA |OPENSSH |EC |DSA )?PRIVATE KEY|UMBRA-[A-Za-z0-9_-]{20,}\." $FILES 2>/dev/null || true)
+if [ -n "$HITS" ]; then
+  echo "SECRET MATERIAL DETECTED - commit blocked:"
+  echo "$HITS"
+  exit 1
+fi
+exit 0

@@ -199,13 +199,16 @@ def update_readme_releases(version: str, artifact_names: list[str]) -> None:
     README.write_text(new_text, encoding="utf-8")
 
 
-def write_checklist(version: str, artifacts: list[Path]) -> None:
+def write_checklist(version: str, artifacts: list[Path], args_signed: bool = False) -> None:
     today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     lines = [
         f"# Release checklist - {version} ({today})",
         "",
         "## Built",
         "- [ ] Smoke suite green (release.py refuses to build otherwise)",
+        ("- [ ] artifacts signed" if args_signed
+         else "- [ ] UNSIGNED build - configure UMBRA_SIGN_CERT and re-run with --sign "
+              "before wide distribution"),
     ]
     for artifact in artifacts:
         lines.append(f"- [ ] {artifact.name} built")
@@ -234,6 +237,9 @@ def main() -> int:
     parser.add_argument("--dry-run", action="store_true", help="print the plan, change nothing")
     parser.add_argument("--skip-tests", action="store_true", help="do not run the suite (not recommended)")
     parser.add_argument("--skip-exe", action="store_true", help="skip the PyInstaller exe build")
+    parser.add_argument("--sign", action="store_true",
+                        help="attempt artifact signing (requires UMBRA_SIGN_CERT configured; "
+                             "without it the build stays UNSIGNED with a recorded warning)")
     args = parser.parse_args()
 
     old_version = read_version()
@@ -274,9 +280,23 @@ def main() -> int:
             artifacts.append(exe)
     if not artifacts:
         raise SystemExit("no artifacts were built")
+    signed = False
+    if args.sign:
+        # Code signing requires a certificate configured outside this repo
+        # (UMBRA_SIGN_CERT -> signtool/codesign invocation). Until that exists,
+        # every build is explicitly UNSIGNED and the checklist records it.
+        import os as _os
+
+        if _os.environ.get("UMBRA_SIGN_CERT"):
+            print("  [signing] UMBRA_SIGN_CERT is set - wire the signtool/codesign "
+                  "invocation here once the certificate is provisioned.")
+            signed = True
+        else:
+            print("  [signing] UNSIGNED BUILD - no certificate configured. Recorded "
+                  "in RELEASE-CHECKLIST.md; see SUPPORT.md 'Code signing'.")
     sums = write_sums(artifacts)
     update_readme_releases(new_version, [a.name for a in artifacts])
-    write_checklist(new_version, artifacts)
+    write_checklist(new_version, artifacts, args_signed=signed)
     print(f"  SHA256SUMS: {sums}")
     print(f"  checklist:  {CHECKLIST}")
     print(f"release {new_version} staged. Next: commit, tag v{new_version}, upload artifacts.")
