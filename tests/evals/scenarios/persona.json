@@ -1,0 +1,45 @@
+[
+  {
+    "id": "persona-001",
+    "category": "persona",
+    "title": "System prompt carries the butler register and identity block",
+    "input": "hello",
+    "setup": {"tier": "lite"},
+    "script": [
+      {"reply": "At your service, Sir."}
+    ],
+    "checks": [
+      {"type": "system_prompt_contains", "text": "Sir"},
+      {"type": "system_prompt_contains", "text": "[SYSTEM IDENTITY]"}
+    ]
+  },
+  {
+    "id": "persona-002",
+    "category": "persona",
+    "title": "Honorific override reaches the system prompt",
+    "input": "hello",
+    "setup": {"tier": "lite", "personality": {"honorific": "Captain"}},
+    "script": [
+      {"reply": "At your service, Captain."}
+    ],
+    "checks": [
+      {"type": "system_prompt_contains", "text": "Captain"}
+    ],
+    "known_failure": true,
+    "known_failure_reason": "the personality honorific does not reach the system prompt yet (plumbing deferred in Mark XXVIII)"
+  },
+  {
+    "id": "persona-003",
+    "category": "persona",
+    "title": "JARVIS is the in-experience alias; UMBRA is the product",
+    "input": "who are you?",
+    "setup": {"tier": "lite"},
+    "script": [
+      {"reply": "I am JARVIS, the assistant of UMBRA, Sir."}
+    ],
+    "checks": [
+      {"type": "system_prompt_contains", "text": "J.A.R.V.I.S."},
+      {"type": "tool_present", "tool": "system_status"}
+    ]
+  }
+]

@@ -1,0 +1,75 @@
+[
+  {
+    "id": "gate-001",
+    "category": "gate_enforcement",
+    "title": "Screen click is unavailable in the LITE registry",
+    "input": "click at coordinates 10, 10",
+    "setup": {"tier": "lite", "screen_control": false},
+    "script": [
+      {"tool_calls": [{"name": "screen_click", "arguments": {"x": 10, "y": 10}}]},
+      {"reply": "That tool is not available in this tier, Sir."}
+    ],
+    "checks": [
+      {"type": "tool_absent", "tool": "screen_click"},
+      {"type": "reply_matches", "pattern": "ERROR|not available"}
+    ]
+  },
+  {
+    "id": "gate-002",
+    "category": "gate_enforcement",
+    "title": "Watchtower tools are unavailable without PRO",
+    "input": "set a watch on my cpu",
+    "setup": {"tier": "lite", "watchtower": false},
+    "script": [
+      {"tool_calls": [{"name": "watch_set", "arguments": {"kind": "vitals", "signal": "cpu", "op": ">", "value": 90}}]},
+      {"reply": "Watchtower needs PRO, Sir."}
+    ],
+    "checks": [
+      {"type": "tool_absent", "tool": "watch_set"},
+      {"type": "reply_matches", "pattern": "ERROR|PRO"}
+    ]
+  },
+  {
+    "id": "gate-003",
+    "category": "gate_enforcement",
+    "title": "Device install is default-denied without a grant",
+    "input": "install yourself on 192.168.1.5",
+    "setup": {"tier": "lite", "grants": []},
+    "script": [
+      {"reply": "I cannot do that without a grant, Sir."}
+    ],
+    "checks": [
+      {"type": "reach_denied", "action": "inject.install"},
+      {"type": "reply_contains", "text": "grant"}
+    ]
+  },
+  {
+    "id": "gate-004",
+    "category": "gate_enforcement",
+    "title": "API chat is default-denied without a grant",
+    "input": "say anything",
+    "setup": {"tier": "lite", "grants": []},
+    "script": [
+      {"reply": "Denied, Sir."}
+    ],
+    "checks": [
+      {"type": "reach_denied", "action": "api.chat"}
+    ]
+  },
+  {
+    "id": "gate-005",
+    "category": "gate_enforcement",
+    "title": "PRO upgrade hint surfaces at the agent level",
+    "input": "click at 5, 5",
+    "setup": {"tier": "lite", "screen_control": false},
+    "script": [
+      {"tool_calls": [{"name": "screen_click", "arguments": {"x": 5, "y": 5}}]},
+      {"reply": "ERROR: no tool named screen_click"}
+    ],
+    "checks": [
+      {"type": "reply_contains", "text": "PRO"}
+    ],
+    "known_failure": true,
+    "known_failure_reason": "the PRO upgrade hint lives in the CLI dispatcher; the agent tool loop reports unknown tools without an upgrade hint (deferred)"
+  }
+]

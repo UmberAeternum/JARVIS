@@ -107,7 +107,7 @@ class FakeBrain:
 
 
 def version_string() -> None:
-    expect(__version__ == "3.22.0", __version__)
+    expect(__version__ == "3.23.0", __version__)
 
 
 class MockProvider(Provider):
@@ -3225,6 +3225,69 @@ def ga_hardening(tmp: Path) -> None:
         config.config_dir = original
 
 
+def eval_baseline(tmp: Path) -> None:
+    """Phase 2A - the eval engine: scoring, regression detection, compare."""
+    import io
+
+    from rich.console import Console
+
+    from jarvis.brain.router import redact_for_cloud
+    from jarvis.evals import compare_results, load_scenarios, run_scenarios
+
+    scenarios_dir = Path(__file__).resolve().parent / "evals" / "scenarios"
+    scenarios = load_scenarios(scenarios_dir)
+    expect(len(scenarios) == 25, f"expected 25 scenarios, got {len(scenarios)}")
+    categories = {s.get("category") for s in scenarios}
+    expect(categories == {"tool_calling", "gate_enforcement", "destructive",
+                          "memory", "prompt_injection", "persona"},
+           f"category coverage: {categories}")
+
+    # offline run: every scenario executes in an isolated config dir
+    with tempfile.TemporaryDirectory() as td:
+        results = run_scenarios(scenarios, Path(td))
+    expect(results["total"] == 25, f"total: {results['total']}")
+
+    # known failures are recorded honestly with reasons
+    known = [r for r in results["results"] if not r["passed"] and r["known_failure"]]
+    for entry in known:
+        expect(bool(entry.get("reason")), f"known failure {entry['id']} needs a reason")
+    unexplained = [r["id"] for r in results["results"]
+                   if not r["passed"] and not r["known_failure"]]
+    expect(not unexplained, f"unexplained failures: {unexplained}")
+
+    # regression detection: a deliberately broken fixture must fail the compare
+    baseline = {"results": [{"id": r["id"], "category": r["category"],
+                             "passed": r["passed"], "known_failure": r["known_failure"],
+                             "failures": r["failures"]} for r in results["results"]]}
+    broken_results = [dict(r, passed=False, failures=["seeded regression"])
+                      for r in results["results"] if r["passed"]]
+    report = compare_results(baseline, {"results": broken_results})
+    expect(len(report["regressions"]) == len(broken_results) and report["regressions"],
+           f"seeded regression not flagged: {report}")
+
+    # recovery is reported, not flagged as a regression: a scenario that
+    # failed in the prior baseline and passes now
+    first_pass = next(r for r in results["results"] if r["passed"])
+    prior_failing = {"results": [dict(first_pass, passed=False)]}
+    recovered_report = compare_results(prior_failing, baseline)
+    expect(first_pass["id"] in recovered_report["recovered"], "recovery not reported")
+    expect(not recovered_report["regressions"], f"recovery flagged as regression: {recovered_report}")
+
+    # the redaction gate unit checks (shared with the v1 router)
+    cleaned = redact_for_cloud("mail a@b.co path C:\\x\\y.txt key sk-abcdef0123456789")
+    expect("a@b.co" not in cleaned and "C:\\x" not in cleaned, cleaned)
+
+    # baseline file round-trip: written, loaded, compared
+    baseline_path = tmp / "eval-baseline.json"
+    from jarvis.evals import write_baseline
+
+    write_baseline(baseline_path, results)
+    loaded = json.loads(baseline_path.read_text(encoding="utf-8"))
+    expect(len(loaded.get("results", [])) == 25, "baseline file incomplete")
+    report2 = compare_results(loaded, loaded)
+    expect(not report2["regressions"], "self-compare must have no regressions")
+
+
 def main() -> int:
     check("version string", version_string)
     check("registry builds with 22 tools", registry_built)
@@ -3308,6 +3371,7 @@ def main() -> int:
     check("brain v0: providers + gateway + doctor", lambda: brain_v0_providers_gateway(tmp_path))
     check("brain v1: privacy router", lambda: brain_router_v1(tmp_path))
     check("spine bypass attempts", lambda: spine_bypass_attempts(tmp_path))
+    check("eval baseline", lambda: eval_baseline(tmp_path))
 
     check("BrainChain failover", chain_failover)
     check("BrainChain non-transient raises", chain_non_transient_raises)

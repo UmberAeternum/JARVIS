@@ -92,6 +92,15 @@ a warning the first time you run `UMBRA.exe`. Verify downloads with
 pipeline gates it behind `--sign` with `UMBRA_SIGN_CERT` so signed builds
 replace unsigned ones without changing the workflow.
 
+## Eval baseline
+
+`jarvis eval run` executes 25 behavior scenarios offline (scripted
+fixtures against the real agent machinery) — tool calling, gate
+enforcement, destructive-action confirmations, memory, prompt-injection
+plumbing, persona. Two scenarios are recorded as `known_failure` with
+reasons; everything else must pass. If a scenario regresses after an
+update, `jarvis eval compare <old> <new>` shows exactly what changed.
+
 ## Health disclaimer
 
 The Oracle (HR/HRV screening) is an informational heuristic computed against

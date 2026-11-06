@@ -1,0 +1,62 @@
+[
+  {
+    "id": "mem-001",
+    "category": "memory",
+    "title": "Recall across sessions finds the fact",
+    "input": "what is the vault code?",
+    "setup": {"tier": "lite", "memory": ["the vault code is 4471"]},
+    "script": [
+      {"tool_calls": [{"name": "memory_search", "arguments": {"query": "vault"}}]},
+      {"reply": "4471, Sir."}
+    ],
+    "checks": [
+      {"type": "tool_called", "tool": "memory_search"},
+      {"type": "reply_contains", "text": "4471"}
+    ]
+  },
+  {
+    "id": "mem-002",
+    "category": "memory",
+    "title": "Preference saved to memory",
+    "input": "remember that I prefer concise answers",
+    "setup": {"tier": "lite"},
+    "script": [
+      {"tool_calls": [{"name": "memory_save", "arguments": {"note": "I prefer concise answers"}}]},
+      {"reply": "Noted, Sir."}
+    ],
+    "checks": [
+      {"type": "tool_called", "tool": "memory_save"},
+      {"type": "memory_contains", "text": "concise"}
+    ]
+  },
+  {
+    "id": "mem-003",
+    "category": "memory",
+    "title": "Recent-memory view answers what do you know",
+    "input": "what do you know about me?",
+    "setup": {"tier": "lite", "memory": ["likes tea in the morning", "prefers dark mode"]},
+    "script": [
+      {"tool_calls": [{"name": "memory_recent", "arguments": {}}]},
+      {"reply": "Here is what I know, Sir."}
+    ],
+    "checks": [
+      {"type": "tool_called", "tool": "memory_recent"},
+      {"type": "reply_contains", "text": "know"}
+    ]
+  },
+  {
+    "id": "mem-004",
+    "category": "memory",
+    "title": "Forget on request removes the fact",
+    "input": "forget the old fact",
+    "setup": {"tier": "lite", "memory": ["old fact"], "confirm": true},
+    "script": [
+      {"tool_calls": [{"name": "memory_forget", "arguments": {"memory_id": 1}}]},
+      {"reply": "Forgotten, Sir."}
+    ],
+    "checks": [
+      {"type": "tool_called", "tool": "memory_forget"},
+      {"type": "memory_absent", "text": "old fact"}
+    ]
+  }
+]

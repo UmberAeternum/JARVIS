@@ -1,0 +1,79 @@
+[
+  {
+    "id": "tool-001",
+    "category": "tool_calling",
+    "title": "System status query routes to system_status",
+    "input": "check my system status",
+    "setup": {"tier": "lite"},
+    "script": [
+      {"tool_calls": [{"name": "system_status", "arguments": {}}]},
+      {"reply": "All nominal, Sir."}
+    ],
+    "checks": [
+      {"type": "tool_called", "tool": "system_status"},
+      {"type": "schema_valid"},
+      {"type": "reply_contains", "text": "nominal"}
+    ]
+  },
+  {
+    "id": "tool-002",
+    "category": "tool_calling",
+    "title": "Memory save with valid arguments",
+    "input": "save a note that the vault code is 4471",
+    "setup": {"tier": "lite"},
+    "script": [
+      {"tool_calls": [{"name": "memory_save", "arguments": {"note": "the vault code is 4471"}}]},
+      {"reply": "Saved, Sir."}
+    ],
+    "checks": [
+      {"type": "tool_called", "tool": "memory_save", "args_contain": {"note": "the vault code is 4471"}},
+      {"type": "memory_contains", "text": "4471"}
+    ]
+  },
+  {
+    "id": "tool-003",
+    "category": "tool_calling",
+    "title": "Memory search with a query argument",
+    "input": "what do you remember about the vault?",
+    "setup": {"tier": "lite", "memory": ["the vault code is 4471"]},
+    "script": [
+      {"tool_calls": [{"name": "memory_search", "arguments": {"query": "vault"}}]},
+      {"reply": "The vault code is 4471, Sir."}
+    ],
+    "checks": [
+      {"type": "tool_called", "tool": "memory_search", "args_contain": {"query": "vault"}},
+      {"type": "reply_contains", "text": "4471"}
+    ]
+  },
+  {
+    "id": "tool-004",
+    "category": "tool_calling",
+    "title": "list_dir delivers results through the tool channel",
+    "input": "list the files here",
+    "setup": {"tier": "lite", "files": {"readme.txt": "hello"}},
+    "script": [
+      {"tool_calls": [{"name": "list_dir", "arguments": {"path": "."}}]},
+      {"reply": "Here is the listing, Sir."}
+    ],
+    "checks": [
+      {"type": "tool_called", "tool": "list_dir"},
+      {"type": "tool_result_role", "contains": "readme.txt"}
+    ]
+  },
+  {
+    "id": "tool-005",
+    "category": "tool_calling",
+    "title": "Memory search finds project notes",
+    "input": "search my memory for project notes",
+    "setup": {"tier": "lite", "memory": ["project notes are in the drawer"]},
+    "script": [
+      {"tool_calls": [{"name": "memory_search", "arguments": {"query": "project notes"}}]},
+      {"reply": "Found: project notes are in the drawer, Sir."}
+    ],
+    "checks": [
+      {"type": "tool_called", "tool": "memory_search"},
+      {"type": "reply_contains", "text": "drawer"},
+      {"type": "schema_valid"}
+    ]
+  }
+]

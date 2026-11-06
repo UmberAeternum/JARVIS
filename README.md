@@ -85,6 +85,7 @@ Gated tools are auto-denied over the API — approvals live in the dashboard and
 | `jarvis serve` / `jarvis serve --api` | PRO: Bridge over your LAN · LITE: local JSON API for other apps |
 | `jarvis overlay` | Always-on-top companion window (`--attach`, `--clickthrough`) |
 | `jarvis plugin scaffold vscode\|browser` | App-injection starters |
+| `jarvis eval run / compare` | The behavior baseline (25 scenarios) |
 | `jarvis inject scan / install / bundle` | Put UMBRA on another device |
 | `jarvis setup` | Onboarding wizard (`--yes` for CI, `--local` for Ollama) |
 | `jarvis settings show / set / reset` | Configuration (secrets always masked) |
@@ -99,6 +100,18 @@ Gated tools are auto-denied over the API — approvals live in the dashboard and
 | `jarvis health` / `jarvis sentinel` | The Oracle · reminders + briefing daemon |
 | `jarvis face` / `jarvis portal` | Avatar · WebXR room (portal: PRO) |
 | `jarvis license activate / status` | PRO licensing |
+
+## Eval baseline
+
+UMBRA ships a 25-scenario behavior baseline (tool calling, gate enforcement, destructive-action confirmations, memory, prompt-injection plumbing, persona) that proves changes do not regress:
+
+```bash
+jarvis eval run                      # offline, scripted fixtures - CI mode
+jarvis eval run --category memory    # one category
+jarvis eval compare old.json new.json
+```
+
+Offline runs replay recorded fixtures against the real agent machinery — deterministic, no network. Two scenarios are honestly marked `known_failure` (the agent-level PRO upgrade hint and the honorific reaching the system prompt — both deferred); the suite counts them separately.
 
 ## Security model
 

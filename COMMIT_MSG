@@ -1,24 +1,31 @@
-Phase 1 follow-through: actor/scope in the spine, PRO tool ledger, tags
+Phase 2A: the eval baseline (25 scenarios, offline harness)
 
-The pasted Phase 0+1 prompt is fully satisfied; this commit closes the
-last deltas found by reconciling it against what shipped:
+Before any router or provider change reshapes behavior, the current
+single-model behavior is captured as a golden suite.
 
-- authorize(action, target, scope, actor): the chokepoint now takes an
-  explicit scope (tier request - escalation is honored only if that tier
-  is genuinely granted, so it stays consent-bound) and an actor (user |
-  api | overlay | agent) recorded inside the signed ledger entry - every
-  line in the access log now says who asked.
-- PRO tool calls are logged: every screen_click/type/press/scroll that
-  passes its confirmation writes a pro_tool entry to the EDITH ledger
-  (visibility only - the license check remains the gate; noted decision:
-  PRO tools are NOT blocked by the access grant, preserving the shipped
-  license-alone-unlocks behavior).
-- Bypass-attempt tests: forged state file with a foreign fingerprint
-  denied; env vars cannot grant or bypass authorize; scope escalation
-  denied; matching-scope assist allowed; the actor recorded in ledger
-  entries with chain integrity verified.
-- SUPPORT.md: the EDITH access protocol documented (grant tiers,
-  expiry, ledger, revoke, verify).
-- Phase 0 item: the pre-spine commit is tagged pre-spine (d540991,
-  the v3.19.0 release - the last commit before the spine existed).
-- Version 3.22.0.
+- src/jarvis/evals.py: the engine. Loads scenario data, applies per-
+  scenario setup in isolated config dirs (tier via throwaway signer,
+  grants, memory notes, files, personality), replays scripted model steps
+  through the REAL agent machinery (Agent + registry + gates), and
+  evaluates predicate checks - tool_called (with valid-JSON arguments),
+  no_tool_called, schema_valid, reply_contains/matches/not_contains,
+  confirm_asked, tool_absent/present (tier enforcement), reach_denied
+  (default-deny reach), system_prompt_contains, memory_contains/absent,
+  tool_result_role (the data-channel check). compare_results() flags
+  regressions (passed before, failed now - known failures excluded),
+  recoveries, and still-failing scenarios.
+- tests/evals/: 25 scenarios in 6 category files (5 tool calling,
+  5 gate enforcement, 3 destructive confirmations, 4 memory, 5
+  prompt-injection plumbing, 3 persona), harness.py (CLI runner: run
+  [--live] [--category] [--write-baseline], compare), and the recorded
+  baseline.json.
+- Known failures, honest: gate-005 (the PRO upgrade hint lives in the
+  CLI dispatcher, not the agent tool loop) and persona-002 (the
+  personality honorific does not reach the system prompt yet - deferred
+  in Mark XXVIII). Both marked known_failure with reasons; the suite
+  counts them separately and reports recoveries.
+- jarvis eval run [--live] [--category X] and jarvis eval compare
+  <baseline> <new> wired into the CLI; the smoke suite runs the engine
+  and asserts the baseline (scoring, regression detection, baseline file
+  round-trip, redaction unit checks).
+- Version 3.23.0.

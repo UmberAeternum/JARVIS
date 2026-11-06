@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import sys
+import tempfile
 import threading
 from pathlib import Path
 
@@ -502,6 +503,7 @@ def _dispatch(argv: list[str] | None = None) -> int:
             "  inject      scan | install | bundle - put UMBRA on another device\n"
             "  doctor      check Python, config, brain, license, ledger - with fixes\n"
             "  brain       status | route --explain \"<prompt>\" - the model router\n"
+            "  eval        run [--live] [--category X] | compare - the eval baseline\n"
             "  personality show | set - honorific, verbosity, humor, proactivity\n"
             "  access      grant --full | grant --tiers observe,assist,act,install | status | verify | log | revoke --all (EDITH protocol)\n"
             "  voice       show | set <default|jarvis> - TTS voice profile\n"
@@ -614,6 +616,95 @@ def _dispatch(argv: list[str] | None = None) -> int:
             console.print(f"[green]route: {manifest['id']}[/] - {why}")
             return 0
         console.print("usage: jarvis brain status | route --explain \"<prompt>\"")
+        return 1
+    if argv and argv[0] == "eval":
+        from .evals import compare_results, load_scenarios, run_scenarios
+
+        def _eval_scenarios_dir() -> Path | None:
+            candidate = Path(__file__).resolve().parents[2] / "tests" / "evals" / "scenarios"
+            return candidate if candidate.is_dir() else None
+
+        sub = argv[1] if len(argv) > 1 else "run"
+        if sub == "run":
+            rest = argv[2:]
+            category = None
+            if "--category" in rest:
+                index = rest.index("--category")
+                if index + 1 < len(rest):
+                    category = rest[index + 1]
+            scenarios_dir = _eval_scenarios_dir()
+            if scenarios_dir is None:
+                console.print(
+                    "[red]Scenario directory not found.[/] Eval scenarios ship in the "
+                    "repository checkout (tests/evals/scenarios)."
+                )
+                return 1
+            scenarios = load_scenarios(scenarios_dir, category)
+            if not scenarios:
+                console.print(f"[red]no scenarios found for category {category!r}[/]")
+                return 1
+            if "--live" in rest:
+                console.print(
+                    "[yellow]LIVE mode:[/] the configured provider answers each "
+                    "scenario; replies are recorded but NOT scored (model judgment "
+                    "needs human review)."
+                )
+                from .brain import make_brain_chain
+
+                cfg_live = config.Config.load()
+                if cfg_live is None:
+                    console.print("[red]No brain configured.[/]")
+                    return 1
+                chain = make_brain_chain(cfg_live)
+                for scenario in scenarios:
+                    console.print(f"  [bold]{scenario['id']}[/] {scenario.get('title', '')}")
+                    try:
+                        response = chain.create_chat(
+                            messages=[{"role": "user",
+                                       "content": str(scenario.get("input", ""))}]
+                        )
+                        reply_text = (response.choices[0].message.content or "")[:200]
+                        console.print(f"    reply: {reply_text}")
+                    except Exception as exc:
+                        console.print(f"    [red]ERROR: {type(exc).__name__}: {exc}[/]")
+                console.print("[dim]live run complete - replies recorded, not scored[/]")
+                return 0
+            with tempfile.TemporaryDirectory() as tmp_eval:
+                results = run_scenarios(scenarios, Path(tmp_eval))
+            for entry in results["results"]:
+                mark = ("PASS" if entry["passed"]
+                        else "KNOWN-FAIL" if entry["known_failure"] else "FAIL")
+                detail = f" - {'; '.join(entry['failures'])}" if entry["failures"] else ""
+                console.print(f"  [{mark}] {entry['id']} ({entry['category']}){detail}")
+            console.print(
+                f"{results['passed']}/{results['total']} passed · "
+                f"{results['known_failures']} known failures · {results['failed']} failed"
+            )
+            return 1 if results["failed"] else 0
+        if sub == "compare":
+            rest = argv[2:]
+            result_files = [item for item in rest if not item.startswith("--")]
+            if len(result_files) < 2:
+                console.print("usage: jarvis eval compare <baseline.json> <new.json>")
+                return 1
+            try:
+                baseline_doc = json.loads(Path(result_files[0]).read_text(encoding="utf-8"))
+                current_doc = json.loads(Path(result_files[1]).read_text(encoding="utf-8"))
+            except (OSError, ValueError) as exc:
+                console.print(f"[red]could not read results: {exc}[/]")
+                return 1
+            report = compare_results(baseline_doc, current_doc)
+            if report["regressions"]:
+                console.print(f"[red]REGRESSIONS:[/] {', '.join(report['regressions'])}")
+                return 1
+            console.print(
+                "[green]No regressions.[/] recovered: "
+                f"{report['recovered'] or '(none)'} · still failing: "
+                f"{report['still_failing'] or '(none)'}"
+            )
+            return 0
+        console.print("usage: jarvis eval run [--live] [--category X] | "
+                      "compare <baseline> <new>")
         return 1
     if argv and argv[0] == "serve":
         if "--api" in argv[1:]:
