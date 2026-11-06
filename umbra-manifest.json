@@ -1,9 +1,9 @@
 {
   "payload": {
-    "version": "3.17.0",
+    "version": "3.19.0",
     "channel": "stable",
-    "notes": "The injection era, complete: UMBRA lives inside your other apps (local API, overlay, VS Code and browser scaffolds), installs onto other devices with one command, and is present everywhere \u2014 wake phrase, ambient nudges, personality pack, British-butler voice, the HUD boot sequence. All of it local-first, all of it gated.",
-    "url": "https://github.com/UmberAeternum/JARVIS/releases/tag/v3.17.0"
+    "notes": "GA hardening: license device binding and revocation, signed update apply with rollback, a payment webhook queue, privacy and refund policies, and secret hygiene in CI - wrapped in the EDITH consent protocol. UMBRA is now a product.",
+    "url": "https://github.com/UmberAeternum/JARVIS/releases/tag/v3.19.0"
   },
-  "signature": "NebuKjik0I1SO/I8sp8oY6xVW2tGLtOdh+rMUdrdSUDmz4GqK3mOkzmpjAIJe5i/7EBPTLa42V1dn10jXVmzBw=="
+  "signature": "bBdjrHC2WarWk6csiC1qJsRYuo/dzxsi0SeRmeLrqbLfhQMbJ09Q3tMD6UngbcENbdvb52IiJrE8weM+hav+Dg=="
 }
