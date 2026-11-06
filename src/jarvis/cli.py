@@ -501,6 +501,9 @@ def _dispatch(argv: list[str] | None = None) -> int:
             "  plugin      scaffold <vscode|browser> --out <dir> - app-injection starters\n"
             "  inject      scan | install | bundle - put UMBRA on another device\n"
             "  personality show | set - honorific, verbosity, humor, proactivity\n"
+            "  voice       show | set <default|jarvis> - TTS voice profile\n"
+            "  hud         show | theme <hologram|minimal> - dashboard HUD look\n"
+            "  intro       the 10-second boot sequence (--no-audio to skip speech)\n"
             "  api         token rotate | token show - the local API credential\n"
             "  dashboard   the Mission Control: local web dashboard\n"
             "  setup       run the onboarding wizard (setup --yes for CI)\n"
@@ -651,6 +654,55 @@ def _dispatch(argv: list[str] | None = None) -> int:
             "host's own settings at runtime; see the generated README.[/]"
         )
         return 0
+    if argv and argv[0] == "voice":
+        from .config import VoiceConfig
+
+        sub = argv[1] if len(argv) > 1 else "show"
+        current = config.Config.load() or config.Config()
+        if sub == "show":
+            profile = current.voice.profile or "(system default)"
+            console.print(f"TTS profile: {profile}\nprofiles: system default, jarvis (British butler)")
+            return 0
+        if sub == "set":
+            if len(argv) < 3:
+                console.print("usage: jarvis voice set <default|jarvis>")
+                return 1
+            profile = argv[2].strip().lower()
+            if profile in ("default", "system"):
+                profile = ""
+            if profile not in ("", "jarvis"):
+                console.print("[red]unknown profile - use default or jarvis[/]")
+                return 1
+            current.voice.profile = profile
+            current.save()
+            console.print(f"[green]TTS profile set:[/] {profile or 'system default'}"
+                          " (British-butler voice used when a matching SAPI voice exists)")
+            return 0
+        console.print("usage: jarvis voice show | set <default|jarvis>")
+        return 1
+    if argv and argv[0] == "hud":
+        sub = argv[1] if len(argv) > 1 else "show"
+        current = config.Config.load() or config.Config()
+        if sub == "show":
+            console.print(
+                f"theme: {current.hud.theme} · sound: {current.hud.sound} · "
+                f"typed: {current.hud.typed} · boot: {current.hud.boot}"
+            )
+            return 0
+        if sub == "theme":
+            if len(argv) < 3 or argv[2] not in ("hologram", "minimal"):
+                console.print("usage: jarvis hud theme <hologram|minimal>")
+                return 1
+            current.hud.theme = argv[2]
+            current.save()
+            console.print(f"[green]HUD theme:[/] {current.hud.theme}")
+            return 0
+        console.print("usage: jarvis hud show | theme <hologram|minimal>")
+        return 1
+    if argv and argv[0] == "intro":
+        from .intro import run_intro
+
+        return run_intro(console, audio="--no-audio" not in argv[1:])
     if argv and argv[0] == "personality":
         from .personality import load, save
 

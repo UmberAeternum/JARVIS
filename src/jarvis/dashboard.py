@@ -235,7 +235,21 @@ def make_handler(state: DashboardState) -> type:
                     "provider": cfg.brains.primary.provider,
                     "model": cfg.brains.primary.model,
                     "hasKey": bool(cfg.brains.primary.api_key),
+                    "hud": {
+                        "theme": cfg.hud.theme,
+                        "sound": cfg.hud.sound,
+                        "typed": cfg.hud.typed,
+                        "boot": cfg.hud.boot,
+                    },
                 })
+                return
+
+            if path == "/api/vitals":
+                # Mark XXIX: the HUD status ring (CPU/RAM/battery/tier)
+                from . import licensing
+                from .watchtower import read_vitals
+
+                self._json(200, {"vitals": read_vitals(), "tier": licensing.tier()})
                 return
 
             if path == "/api/memory":

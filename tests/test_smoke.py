@@ -106,7 +106,7 @@ class FakeBrain:
 
 
 def version_string() -> None:
-    expect(__version__ == "3.15.0", __version__)
+    expect(__version__ == "3.16.0", __version__)
 
 
 def registry_built() -> None:
@@ -2490,6 +2490,78 @@ def presence_wake_ambient_personality(tmp: Path) -> None:
         config.config_dir = original
 
 
+def hud_voice_intro(tmp: Path) -> None:
+    """Mark XXIX - HUD config, voice profile, intro boot sequence."""
+    import io
+
+    from rich.console import Console
+
+    from jarvis.intro import run_intro
+
+    original = config.config_dir
+    config.config_dir = lambda: tmp / "cfghud"
+    try:
+        # config round-trip: hud section + voice profile (additive, schema v4)
+        cfg = config.Config(
+            brains=config.BrainsConfig(primary=config.BrainConfig(type="local"))
+        )
+        cfg.hud.theme = "minimal"
+        cfg.hud.sound = False
+        cfg.voice.profile = "jarvis"
+        cfg.save()
+        reloaded = config.Config.load()
+        expect(reloaded is not None, "config load failed")
+        expect(reloaded.hud.theme == "minimal" and reloaded.hud.sound is False, "hud not persisted")
+        expect(reloaded.voice.profile == "jarvis", "voice profile not persisted")
+        expect(reloaded.ambient.nudges is False and reloaded.hud.boot is True,
+               "new sections must carry safe defaults")
+
+        # intro: --no-audio path (stage_s=0) exits 0 with the closing panel
+        out = io.StringIO()
+        code = run_intro(Console(file=out, force_terminal=False), audio=False, stage_s=0)
+        text = out.getvalue()
+        expect(code == 0, "intro must exit 0")
+        expect("all systems nominal" in text and "System online, Sir." in text, text[-400:])
+
+        # voice profile: graceful without any TTS stack (speak returns False)
+        from jarvis.voice import VoiceIO
+
+        voice = VoiceIO(tts_enabled=True, profile="jarvis")
+        spoke = voice.speak("test")
+        expect(spoke is False or spoke is True, "speak must not crash on profile")
+    finally:
+        config.config_dir = original
+
+    # dashboard: /api/vitals + /api/state hud section (server round-trip)
+    import http.client
+
+    from jarvis import dashboard as dash
+
+    config.config_dir = lambda: tmp / "cfghud2"
+    try:
+        state = dash.DashboardState(config.Config())
+        server, port, thread = dash.start_server(state, preferred_port=0)
+        conn = http.client.HTTPConnection("127.0.0.1", port, timeout=10)
+        try:
+            conn.request("GET", "/api/vitals")
+            resp = conn.getresponse()
+            vitals = json.loads(resp.read().decode("utf-8"))
+            expect(resp.status == 200 and "vitals" in vitals and "tier" in vitals,
+                   f"vitals endpoint: {vitals}")
+            conn.request("GET", "/api/state")
+            resp = conn.getresponse()
+            state_data = json.loads(resp.read().decode("utf-8"))
+            expect(state_data.get("hud", {}).get("theme") == "hologram",
+                   f"hud state: {state_data.get('hud')}")
+        finally:
+            conn.close()
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=5)
+    finally:
+        config.config_dir = original
+
+
 def main() -> int:
     check("version string", version_string)
     check("registry builds with 22 tools", registry_built)
@@ -2562,6 +2634,7 @@ def main() -> int:
     check("plugin scaffolds", lambda: plugin_scaffolds(tmp_path))
     check("inject scan + plans + bundle", lambda: inject_scan_plan_bundle(tmp_path))
     check("presence: wake + ambient + personality", lambda: presence_wake_ambient_personality(tmp_path))
+    check("hud + voice profile + intro", lambda: hud_voice_intro(tmp_path))
 
     check("BrainChain failover", chain_failover)
     check("BrainChain non-transient raises", chain_non_transient_raises)

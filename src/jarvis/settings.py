@@ -26,6 +26,7 @@ SETTABLE: tuple[str, ...] = (
     "voice.stt_model",
     "voice.tts_enabled",
     "voice.mic_device",
+    "voice.profile",
     "vision.enabled",
     "vision.model",
     "vision.auto_attach",
@@ -43,6 +44,10 @@ SETTABLE: tuple[str, ...] = (
     "ambient.quiet_start",
     "ambient.quiet_end",
     "ambient.rate_limit_min",
+    "hud.theme",
+    "hud.sound",
+    "hud.typed",
+    "hud.boot",
     "max_tool_iterations",
     "max_tokens_per_turn",
     "use_keyring",
@@ -115,7 +120,7 @@ def show_text(cfg: config.Config) -> str:
     )
     lines.append(
         f"voice: enabled={cfg.voice.enabled} tts={cfg.voice.tts_enabled} "
-        f"stt_model={cfg.voice.stt_model}"
+        f"stt_model={cfg.voice.stt_model} profile={cfg.voice.profile or '(system default)'}"
     )
     lines.append(
         f"vision: enabled={cfg.vision.enabled} monitor={cfg.vision.monitor} "
@@ -131,6 +136,10 @@ def show_text(cfg: config.Config) -> str:
         f"reminders={cfg.ambient.reminders} health={cfg.ambient.health} "
         f"quiet={cfg.ambient.quiet_start}-{cfg.ambient.quiet_end} "
         f"rate_limit_min={cfg.ambient.rate_limit_min}"
+    )
+    lines.append(
+        f"hud: theme={cfg.hud.theme} sound={cfg.hud.sound} typed={cfg.hud.typed} "
+        f"boot={cfg.hud.boot}"
     )
     lines.append(f"config file: {config.config_path()}")
     return "\n".join(lines)

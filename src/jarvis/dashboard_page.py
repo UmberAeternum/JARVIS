@@ -104,6 +104,17 @@ PAGE = r"""<!doctype html>
   .confirm .cbtns { display: flex; gap: 8px; margin-top: 8px; }
   .confirm .yes { border-color: rgba(74, 222, 128, 0.6); color: var(--ok); }
   .confirm .no { border-color: rgba(255, 107, 107, 0.6); color: var(--bad); }
+  #scanlines { position: fixed; inset: 0; pointer-events: none; opacity: .05; display: none;
+    background: repeating-linear-gradient(0deg, transparent 0 2px, #00e5ff 2px 3px); }
+  body.minimal #scanlines { display: none !important; }
+  #boot { position: fixed; inset: 0; background: var(--bg); z-index: 50; display: flex;
+    align-items: center; justify-content: center; color: var(--cyan); font-size: 14px;
+    letter-spacing: .25em; }
+  #vitals { display: flex; gap: 16px; align-items: center; padding: 8px 18px;
+    border-bottom: 1px solid rgba(0, 229, 255, .08); font-size: 11px; color: var(--dim); }
+  .ring { width: 54px; height: 54px; border-radius: 50%; display: flex; align-items: center;
+    justify-content: center; color: var(--cyan); font-size: 11px; }
+  .ring small { color: var(--dim); font-size: 9px; letter-spacing: .1em; }
 </style>
 </head>
 <body>
@@ -122,6 +133,9 @@ PAGE = r"""<!doctype html>
   <button data-tab="watch">WATCHTOWER</button>
   <button data-tab="settings">SETTINGS</button>
 </nav>
+<div id="scanlines"></div>
+<div id="boot">SYSTEMS ONLINE</div>
+<div id="vitals" style="max-width:980px; margin:0 auto; border:1px solid rgba(0,229,255,.18); border-radius:8px;"></div>
 <main>
   <section id="tab-chat" class="active">
     <div class="card">
@@ -304,6 +318,59 @@ function answerConfirm(id, approved) {
   if (banner) banner.remove();
   api("/api/confirm", { confirm_id: id, approved: approved });
 }
+/* Mark XXIX - HUD: status ring, typed replies, sound cues, theme, boot */
+var hud = { theme: "hologram", sound: true, typed: true, boot: true };
+var audioCtx = null;
+function cue(kind) {
+  if (!hud.sound) return;
+  try {
+    if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    var osc = audioCtx.createOscillator(), gain = audioCtx.createGain();
+    osc.frequency.value = kind === "confirm" ? 880 : kind === "reply" ? 660 : 440;
+    gain.gain.value = 0.04;
+    osc.connect(gain); gain.connect(audioCtx.destination);
+    osc.start(); osc.stop(audioCtx.currentTime + (kind === "confirm" ? 0.12 : 0.07));
+  } catch (e) { /* audio is cosmetic */ }
+}
+function ringHtml(label, pct, suffix) {
+  var p = Math.max(0, Math.min(100, pct));
+  return '<div class="ring" style="background:conic-gradient(var(--cyan) ' + p + '%, rgba(0,229,255,.12) 0);">' +
+    '<div style="width:44px;height:44px;border-radius:50%;background:var(--bg);display:flex;' +
+    'flex-direction:column;align-items:center;justify-content:center;">' + Math.round(p) + suffix +
+    '<small>' + label + '</small></div></div>';
+}
+function refreshVitals() {
+  api("/api/vitals").then(function (res) {
+    if (!res.ok) return;
+    var v = res.data.vitals || {};
+    var parts = [];
+    if (typeof v.cpu === "number") parts.push(ringHtml("CPU", v.cpu, "%"));
+    if (typeof v.ram === "number") parts.push(ringHtml("RAM", v.ram, "%"));
+    if (typeof v.battery === "number") parts.push(ringHtml("PWR", v.battery, "%"));
+    parts.push('<div class="ring" style="border:1px solid rgba(255,179,0,.5); color:var(--amber);">' +
+      '<div style="text-align:center;"><div style="font-size:12px;">' + (res.data.tier || "").toUpperCase() +
+      '</div><small>TIER</small></div></div>');
+    $("vitals").innerHTML = parts.join("");
+  }).catch(function () { /* cosmetic */ });
+}
+function typedReply(text) {
+  var div = document.createElement("div");
+  div.className = "msg bot";
+  $("chatlog").appendChild(div);
+  var i = 0;
+  var timer = setInterval(function () {
+    i = Math.min(text.length, i + 4);
+    div.textContent = text.slice(0, i) + (i < text.length ? " ▌" : "");
+    $("chatlog").scrollTop = $("chatlog").scrollHeight;
+    if (i >= text.length) clearInterval(timer);
+  }, 14);
+  $("chatlog").scrollTop = $("chatlog").scrollHeight;
+}
+function applyHud() {
+  document.body.classList.toggle("minimal", hud.theme === "minimal");
+  $("scanlines").style.display = hud.theme === "hologram" ? "block" : "none";
+}
+
 /* Mark XXIII - the living reply: streaming bubble + on-device speech */
 var streamingEl = null;
 function finishStreaming() {
@@ -347,7 +414,9 @@ function applyEvent(ev) {
   }
   else if (ev.type === "reply") {
     finishStreaming();
-    addMsg("bot", ev.text);
+    if (hud.typed && ev.text.indexOf("ERROR:") !== 0) { typedReply(ev.text); }
+    else { addMsg("bot", ev.text); }
+    cue("reply");
     if (speakOn && ev.text.indexOf("ERROR:") !== 0) speak(ev.text);
   }
   else if (ev.type === "status") addStatus(ev.text);
@@ -526,6 +595,15 @@ function refreshState() {
     var d = res.data;
     $("ver").textContent = "v" + d.version;
     $("tier").textContent = (d.tier === "pro" ? "PRO" : "LITE") + (d.hasKey ? "" : " - NO KEY");
+    if (d.hud) {
+      hud = d.hud;
+      applyHud();
+      var boot = $("boot");
+      if (boot) {
+        if (hud.boot) { setTimeout(function () { if (boot.parentNode) boot.parentNode.removeChild(boot); }, 1600); }
+        else if (boot.parentNode) { boot.parentNode.removeChild(boot); }
+      }
+    }
   });
 }
 
@@ -535,6 +613,8 @@ function refreshState() {
   if (speakOn) { b.textContent = "SPEAK: ON"; b.className = "mini on"; }
 })();
 refreshState();
+refreshVitals();
+setInterval(refreshVitals, 10000);
 loadSessions();
 pollEvents();
 </script>

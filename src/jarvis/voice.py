@@ -172,11 +172,13 @@ class VoiceIO:
         tts_enabled: bool = True,
         mic_device: int | None = None,
         on_status: Callable[[str], None] | None = None,
+        profile: str = "",
     ):
         self.stt_model = stt_model  # whisper model size; ignored by the vosk backend
         self.tts_enabled = tts_enabled
         self.mic_device = mic_device
         self.on_status = on_status or (lambda status: None)
+        self.profile = profile  # Mark XXIX: "" | "jarvis" (British butler)
         self.last_error = ""
         self._whisper = None  # cached WhisperModel
         self._vosk = None  # cached vosk Model
@@ -382,7 +384,13 @@ class VoiceIO:
     # ------------------------------------------------------------------ mouth
 
     def speak(self, text: str) -> bool:
-        """Speak a reply aloud. Returns False (with last_error set) on failure."""
+        """Speak a reply aloud. Returns False (with last_error set) on failure.
+
+        profile (Mark XXIX): "jarvis" selects a British-English SAPI voice
+        (dry, precise butler register) at a slightly reduced rate; any other
+        profile value falls back to the system default voice - the text path
+        never depends on a matching voice existing.
+        """
         if not self.tts_enabled or not text.strip():
             return False
         ok, reason = tts_available()
@@ -396,6 +404,8 @@ class VoiceIO:
             import pyttsx3
 
             engine = pyttsx3.init()  # fresh engine per utterance: reliable on SAPI5
+            if self.profile == "jarvis":
+                _apply_jarvis_voice(engine)
             try:
                 engine.say(spoken)
                 engine.runAndWait()
@@ -405,3 +415,21 @@ class VoiceIO:
         except Exception as exc:
             self.last_error = f"TTS failed: {exc}"
             return False
+
+
+def _apply_jarvis_voice(engine) -> None:
+    """Best-effort British-butler voice profile: prefer an en-GB SAPI voice
+    (Hazel/George on Windows), slightly slower rate. Silent fallback to the
+    system default when no British voice exists."""
+    try:
+        wanted = ("en-gb", "hazel", "george", "british", "gbr")
+        for voice in engine.getProperty("voices"):
+            haystack = (str(getattr(voice, "id", "")) + " " + str(getattr(voice, "name", ""))).lower()
+            if any(tag in haystack for tag in wanted):
+                engine.setProperty("voice", voice.id)
+                break
+        rate = engine.getProperty("rate")
+        if isinstance(rate, (int, float)) and rate > 150:
+            engine.setProperty("rate", int(rate * 0.92))
+    except Exception:
+        pass  # profile is cosmetic - never break the spoken reply

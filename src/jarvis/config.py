@@ -149,6 +149,18 @@ class VoiceConfig:
     tts_enabled: bool = True     # speak replies aloud?
     mic_device: int | None = None  # sounddevice input device index (None = default)
     wake_phrase: str = "Hey UMBRA"  # Mark XXVIII: hands-free wake phrase
+    profile: str = ""            # Mark XXIX: "" | "jarvis" (British butler TTS)
+
+
+@dataclass
+class HudConfig:
+    """Mark XXIX: dashboard HUD polish. Pure presentation; defaults are the
+    hologram look with sound + typed responses on."""
+
+    theme: str = "hologram"      # hologram | minimal (CSS only, no projection)
+    sound: bool = True           # subtle sound cues (WebAudio, local)
+    typed: bool = True           # typed-out response effect
+    boot: bool = True            # boot sequence on dashboard load
 
 
 @dataclass
@@ -203,6 +215,7 @@ class Config:
     updates: UpdatesConfig = field(default_factory=UpdatesConfig)
     diagnostics: DiagnosticsConfig = field(default_factory=DiagnosticsConfig)
     ambient: AmbientConfig = field(default_factory=AmbientConfig)
+    hud: HudConfig = field(default_factory=HudConfig)
     created_at: str = ""
     updated_at: str = ""
 
@@ -241,6 +254,7 @@ class Config:
                 "tts_enabled": self.voice.tts_enabled,
                 "mic_device": self.voice.mic_device,
                 "wake_phrase": self.voice.wake_phrase,
+                "profile": self.voice.profile,
             },
             "vision": {
                 "enabled": self.vision.enabled,
@@ -266,6 +280,12 @@ class Config:
                 "quiet_start": self.ambient.quiet_start,
                 "quiet_end": self.ambient.quiet_end,
                 "rate_limit_min": self.ambient.rate_limit_min,
+            },
+            "hud": {
+                "theme": self.hud.theme,
+                "sound": self.hud.sound,
+                "typed": self.hud.typed,
+                "boot": self.hud.boot,
             },
             "created_at": self.created_at,
             "updated_at": self.updated_at,
@@ -348,6 +368,11 @@ class Config:
         return AmbientConfig(**{k: v for k, v in (raw or {}).items() if k in known})
 
     @classmethod
+    def _hud_from(cls, raw: dict | None) -> HudConfig:
+        known = {f.name for f in fields(HudConfig)}
+        return HudConfig(**{k: v for k, v in (raw or {}).items() if k in known})
+
+    @classmethod
     def _from_modern(cls, raw: dict) -> "Config":
         """v2/v3/v4 share every key except voice and vision (defaults fill in)."""
         use_keyring = bool(raw.get("use_keyring", False))
@@ -362,6 +387,7 @@ class Config:
             updates=cls._updates_from(raw.get("updates")),
             diagnostics=cls._diagnostics_from(raw.get("diagnostics")),
             ambient=cls._ambient_from(raw.get("ambient")),
+            hud=cls._hud_from(raw.get("hud")),
             created_at=raw.get("created_at", ""),
             updated_at=raw.get("updated_at", ""),
         )
