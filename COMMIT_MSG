@@ -1,13 +1,10 @@
-Phase 5: memory CLI + evening briefing
+Phase 6: cascade + planner mode (brain v2/v3)
 
-- jarvis memory list | search <q> | forget <id> | undo | export [file] | wipe [--yes]:
-  the second brain becomes directly manageable from the CLI. forget stashes
-  the note for undo (memory-undo.json); undo restores it; export writes
-  JSON; wipe clears all (requires explicit confirm or --yes).
-- sentinel.py: compose_evening_briefing — today's recap, unfinished board
-  tasks, health line, daily reminder count for tomorrow; run_sentinel
-  gains an optional evening_time parameter.
-- Morning briefing recaps the most recent recorded session (continuity).
-- Tests: stash/undo round trip, export content, wipe, evening briefing
-  content, morning briefing intact.
-- Version 3.24.0.
+- brain/cascade.py: cheap model first, verifier checks the reply, escalate
+ on verification failure. Never downgrades privacy.
+- planner.py: plan_goal parses the brain's JSON step plan; execute_plan
+ runs each step through the authorize chokepoint with per-step confirm
+ for act/install tiers; every step in the ledger.
+- jarvis plan "<goal>" [--dry-run]: preview without acting.
+- Tests: escalation, privacy, plan parsing, execution, denial, dry-run.
+- Version 3.25.0.

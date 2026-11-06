@@ -504,6 +504,7 @@ def _dispatch(argv: list[str] | None = None) -> int:
             "  inject      scan | install | bundle - put UMBRA on another device\n"
             "  doctor      check Python, config, brain, license, ledger - with fixes\n"
             "  brain       status | route --explain \"<prompt>\" - the model router\n"
+            "  plan        \"<goal>\" [--dry-run] - plan a goal into gated steps\n"
             "  eval        run [--live] [--category X] | compare - the eval baseline\n"
             "  personality show | set - honorific, verbosity, humor, proactivity\n"
             "  access      grant --full | grant --tiers observe,assist,act,install | status | verify | log | revoke --all (EDITH protocol)\n"
@@ -718,6 +719,52 @@ def _dispatch(argv: list[str] | None = None) -> int:
         console.print("usage: jarvis eval run [--live] [--category X] | "
                       "compare <baseline> <new>")
         return 1
+    if argv and argv[0] == "plan":
+        from .planner import execute_plan, plan_goal
+        from .brain.manifest import load_manifests, manifests_dir
+
+        rest = argv[1:]
+        dry = "--dry-run" in rest
+        goal = " ".join(part for part in rest if not part.startswith("--")).strip()
+        if not goal:
+            console.print('usage: jarvis plan "<goal>" [--dry-run]')
+            return 1
+        cfg = config.Config.load()
+        if cfg is None:
+            console.print(
+                "[yellow]No brain configured yet.[/] Run [bold]python -m jarvis[/] "
+                "once and complete the wizard - the planner speaks through that brain."
+            )
+            return 1
+        chain = brain.make_brain_chain(cfg)
+        manifests, _manifest_errors = load_manifests(manifests_dir())
+        try:
+            steps = plan_goal(goal, chain, manifests, cfg.router)
+        except Exception as exc:
+            console.print(f"[red]planning failed: {type(exc).__name__}: {exc}[/]")
+            return 1
+        console.print(f"[bold cyan]PLAN[/] for: {goal}")
+        for index, step in enumerate(steps, 1):
+            console.print(f"  {index}. [dim]{step.get('requires', '?')}[/] {step.get('step', '')}")
+        if dry:
+            console.print("[dim]dry-run: plan shown, nothing executed.[/]")
+            return 0
+        from rich.prompt import Confirm
+
+        from . import access
+
+        def confirm_step(description: str) -> bool:
+            return Confirm.ask(description, default=False)
+
+        results = execute_plan(steps, access.authorize, confirm_step, console)
+        executed = sum(1 for r in results if r["status"] == "executed")
+        denied = sum(1 for r in results if r["status"] == "denied")
+        declined = sum(1 for r in results if r["status"] == "declined")
+        console.print(
+            f"[bold]Plan complete:[/] {executed} executed · {denied} denied · "
+            f"{declined} declined (every step in the ledger)."
+        )
+        return 0
     if argv and argv[0] == "serve":
         if "--api" in argv[1:]:
             # Mark XXVI: the embeddable local API - loopback + token, the same

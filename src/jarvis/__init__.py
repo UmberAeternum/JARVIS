@@ -1,5 +1,5 @@
 """J.A.R.V.I.S. - a personal AI assistant with a safe tool-execution backend."""
 
-__version__ = "3.24.0"
+__version__ = "3.25.0"
 
 PRODUCT_NAME = "UMBRA"

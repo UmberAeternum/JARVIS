@@ -107,7 +107,7 @@ class FakeBrain:
 
 
 def version_string() -> None:
-    expect(__version__ == "3.24.0", __version__)
+    expect(__version__ == "3.25.0", __version__)
 
 
 class MockProvider(Provider):
@@ -3337,6 +3337,262 @@ def eval_baseline(tmp: Path) -> None:
     expect(not report2["regressions"], "self-compare must have no regressions")
 
 
+def cascade_planner(tmp: Path) -> None:
+    """Phase 6 - brain v2 cascade (verify + escalate, privacy preserved)
+    and planner mode (plan_goal parsing + execute_plan behind the spine)."""
+    import io
+
+    from rich.console import Console
+
+    from jarvis import access
+    from jarvis.brain.cascade import cascade, verify_reply
+    from jarvis.brain.manifest import BUILTIN_MANIFESTS
+    from jarvis.brain.router import RouterConfig
+    from jarvis.planner import execute_plan, plan_goal
+
+    cfg = RouterConfig(cloud_providers=["openai-compat"])
+    log_path = tmp / "cascade-route-log.jsonl"
+
+    def allow_all(*args, **kwargs) -> tuple[bool, str]:
+        return True, "authorized (test)"
+
+    # unit: the cheap verifier
+    ok, why = verify_reply({"reply": "hello", "tool_calls": None})
+    expect(ok and not why, f"verifier on a plain reply: {ok} {why}")
+    ok, why = verify_reply({"reply": "", "tool_calls": None})
+    expect(not ok and "empty" in why, f"verifier on an empty reply: {why}")
+    ok, why = verify_reply({"reply": "x", "tool_calls": [{"name": "t", "arguments": "{oops}"}]})
+    expect(not ok and "not valid JSON" in why, f"verifier on bad args: {why}")
+
+    # escalation: empty reply fails verification -> the next provider answers
+    providers = {
+        "ollama": MockProvider(reply=""),
+        "openai-compat": MockProvider(reply="the speed of light is about 299,792 km/s"),
+    }
+    result = cascade({"text": "what is the speed of light"}, BUILTIN_MANIFESTS, cfg,
+                     log_path, providers, allow_all)
+    expect(result["verified"] is True, f"step 2 must verify: {result}")
+    expect(result["reply"].startswith("the speed of light"), f"reply: {result['reply']!r}")
+    expect(result["route"]["cascade_step"] == 2, f"route: {result['route']}")
+    expect(result["route"]["model"] == "openai-compat/configured", result["route"])
+    expect("escalated" in result["route"]["reason"], result["route"])
+
+    # privacy: a sensitive request never escalates to a cloud provider
+    result = cascade({"text": "my file is at C:\\Users\\me\\secret.txt"}, BUILTIN_MANIFESTS,
+                     cfg, log_path, providers, allow_all)
+    expect(result["verified"] is False, f"sensitive request must not escalate: {result}")
+    expect(result["route"]["model"] == "ollama/qwen2.5:7b", result["route"])
+    expect(result["route"]["cascade_step"] == 1, result["route"])
+    expect("privacy" in result["route"]["reason"], result["route"])
+    logged = log_path.read_text(encoding="utf-8")
+    expect("secret.txt" not in logged, "the route log must never contain prompt text")
+
+    # tool proposals go through the authorizer; denied proposals are dropped
+    class ToolMock(Provider):
+        name = "toolmock"
+
+        def __init__(self, reply, calls):
+            self._reply = reply
+            self._calls = list(calls)
+
+        def chat(self, messages, tools=None):
+            calls = list(self._calls) if self._calls else None
+            self._calls = []
+            return {"reply": self._reply, "tool_calls": calls}
+
+    authorizer_calls: list[tuple] = []
+
+    def deny_run_command(action, target="", scope=None, actor="user"):
+        authorizer_calls.append((action, target, scope, actor))
+        if action == "tool.run_command":
+            return False, "run_command denied - tier 'install' not granted"
+        return True, "authorized"
+
+    tool_providers = {
+        "ollama": ToolMock("running that now", [{
+            "id": "t1", "name": "run_command",
+            "arguments": "{\"command\": [\"python\", \"--version\"]}",
+        }]),
+    }
+    result = cascade({"text": "tell me the python version"}, BUILTIN_MANIFESTS, cfg,
+                     log_path, tool_providers, deny_run_command)
+    expect(result["verified"] is True, f"valid reply with a proposal: {result}")
+    expect(result["tool_calls"] == [], f"denied proposal must be dropped: {result['tool_calls']}")
+    expect(len(result["denied_tools"]) == 1
+           and result["denied_tools"][0]["name"] == "run_command", result["denied_tools"])
+    expect(authorizer_calls and authorizer_calls[0][0] == "tool.run_command", authorizer_calls)
+    expect(authorizer_calls[0][3] == "agent", "the actor must be 'agent'")
+
+    # malformed tool arguments fail verification and escalate
+    bad_providers = {
+        "ollama": ToolMock("attempting", [
+            {"id": "t2", "name": "run_command", "arguments": "{not valid json}"}]),
+        "openai-compat": MockProvider(reply="clean answer instead"),
+    }
+    result = cascade({"text": "a plain request, nothing private"}, BUILTIN_MANIFESTS, cfg,
+                     log_path, bad_providers, allow_all)
+    expect(result["verified"] is True and result["reply"] == "clean answer instead", result)
+    expect(result["route"]["cascade_step"] == 2, result["route"])
+
+    # plan_goal parses the brain's JSON steps; planning is a pure chat turn
+    class PlanChain:
+        def __init__(self, reply):
+            self.reply = reply
+            self.calls = []
+
+        def create_chat(self, messages=None, **kwargs):
+            self.calls.append({"messages": messages, **kwargs})
+            return FakeResp(FakeMsg(self.reply))
+
+    good = ('[{"step": "check the battery", "requires": "observe"}, '
+            '{"step": "draft the summary", "requires": "assist"}]')
+    chain = PlanChain(good)
+    steps = plan_goal("prepare the weekly report", chain, BUILTIN_MANIFESTS, cfg)
+    expect(steps == [{"step": "check the battery", "requires": "observe"},
+                     {"step": "draft the summary", "requires": "assist"}], f"steps: {steps}")
+    expect(len(chain.calls) == 1, f"planning is one chat turn: {len(chain.calls)}")
+    expect("prepare the weekly report" in json.dumps(chain.calls[0]["messages"]),
+           "the goal must reach the planning prompt")
+    expect(chain.calls[0].get("tools") is None, "planning must offer zero tool schemas")
+
+    # fenced JSON parses too; a case-variant tier normalizes
+    steps = plan_goal("goal", PlanChain('```json\n[{"step": "Tidy up", "requires": "ACT"}]\n```'),
+                      BUILTIN_MANIFESTS, cfg)
+    expect(steps == [{"step": "Tidy up", "requires": "act"}], f"fenced: {steps}")
+
+    # a non-JSON reply falls back to the honest single-step plan
+    steps = plan_goal("clean up the downloads folder",
+                      PlanChain("I would start by looking around, then tidy things."),
+                      BUILTIN_MANIFESTS, cfg)
+    expect(steps == [{"step": "clean up the downloads folder", "requires": "assist"}],
+           f"fallback: {steps}")
+
+    # execute_plan behind the REAL spine: allowed steps run, confirm gates act
+    original = config.config_dir
+    try:
+        config.config_dir = lambda: tmp / "cfgplan6"
+        ok, message = access.grant_tiers(["observe", "assist", "act"],
+                                         access.CONFIRMATION_PHRASE)
+        expect(ok is True, message)
+        steps = [{"step": "look at the battery", "requires": "observe"},
+                 {"step": "draft the summary", "requires": "assist"},
+                 {"step": "rename the report", "requires": "act"}]
+        confirms: list[str] = []
+
+        def allow_confirm(description: str) -> bool:
+            confirms.append(description)
+            return True
+
+        results = execute_plan(steps, access.authorize, allow_confirm,
+                               Console(file=io.StringIO(), force_terminal=False))
+        expect(len(results) == 3, f"results: {results}")
+        expect(all(r["status"] == "executed" for r in results), f"results: {results}")
+        expect(all(r["confirmed"] is False for r in results[:2]), f"results: {results}")
+        expect(results[2]["confirmed"] is True, f"act step confirm: {results[2]}")
+        expect(len(confirms) == 1, f"only the act tier asks for confirm: {confirms}")
+        entries = [e for e in access.log_entries() if e.get("action") == "plan.step"]
+        expect(len(entries) == 3, f"every step in the ledger: {entries}")
+        expect(any("look at the battery" in e.get("detail", "") for e in entries),
+               f"ledger detail carries the step text: {entries}")
+        expect(any(e.get("action") == "reach_allowed" for e in access.log_entries()),
+               "the spine's own decision must be in the ledger too")
+        expect(all(e.get("integrity") == "ok" for e in access.log_entries()),
+               "ledger integrity")
+
+        # a denied step stops the plan and is recorded (fresh ledger)
+        config.config_dir = lambda: tmp / "cfgplan6b"
+        denied_steps = [{"step": "look around", "requires": "observe"},
+                        {"step": "do the thing", "requires": "assist"}]
+        results = execute_plan(denied_steps, access.authorize, allow_confirm,
+                               Console(file=io.StringIO(), force_terminal=False))
+        expect(len(results) == 1 and results[0]["status"] == "denied", f"results: {results}")
+        expect("not granted" in results[0]["reason"], results[0]["reason"])
+        entries = [e for e in access.log_entries() if e.get("action") == "plan.step"]
+        expect(len(entries) == 1 and "denied" in entries[0].get("detail", ""),
+               f"the denial must be recorded: {entries}")
+        expect(any(e.get("action") == "reach_denied" for e in access.log_entries()),
+               "the spine's denial must be in the ledger")
+    finally:
+        config.config_dir = original
+
+
+def planner_dry_run(tmp: Path) -> None:
+    """Phase 6 - jarvis plan --dry-run: prints the plan, zero tool calls;
+    without --dry-run the dispatch wires the real execute path."""
+    import contextlib
+    import io
+    import json as jsonlib
+
+    import jarvis.brain as brain_pkg
+    import jarvis.cli as cli_module
+    import jarvis.planner as planner_module
+    from jarvis import access
+    from jarvis.agent import Agent
+    from jarvis.evals import _tool_calls_in
+    from jarvis.tools import default_registry
+
+    original_cfg = config.config_dir
+    saved_factory = brain_pkg.make_brain_chain
+    saved_execute = planner_module.execute_plan
+    plan_json = jsonlib.dumps([
+        {"step": "check the battery", "requires": "observe"},
+        {"step": "draft the note", "requires": "assist"},
+    ])
+
+    class RecordingChain:
+        def __init__(self):
+            self.calls = []
+
+        def create_chat(self, messages=None, **kwargs):
+            self.calls.append({"messages": messages, **kwargs})
+            return FakeResp(FakeMsg(plan_json))
+
+    try:
+        config.config_dir = lambda: tmp / "cfgplancli"
+        config.Config(brains=config.BrainsConfig(
+            primary=config.BrainConfig(type="local", provider="ollama",
+                                       base_url="http://localhost:11434/v1",
+                                       model="plan-model"))).save()
+
+        chain = RecordingChain()
+        brain_pkg.make_brain_chain = lambda cfg2, on_status=None: chain
+        execute_calls: list = []
+        planner_module.execute_plan = lambda *args, **kwargs: (
+            execute_calls.append(args) or [])
+
+        buffer = io.StringIO()
+        with contextlib.redirect_stdout(buffer):
+            code = cli_module._dispatch(["plan", "prepare the weekly report", "--dry-run"])
+        expect(code == 0, f"dry-run exit code: {code}")
+        expect(len(execute_calls) == 0, "dry-run must never call execute_plan")
+        expect(len(chain.calls) == 1, f"planning is one chat turn: {len(chain.calls)}")
+        expect(chain.calls[0].get("tools") is None,
+               "the planning turn must offer zero tool schemas")
+        # the agent's tool_calls list is empty - no tool call anywhere in the flow
+        agent = Agent(chain, default_registry(confirm=lambda description: False,
+                                              workspace=tmp))
+        expect(_tool_calls_in(agent.messages) == [],
+               "the agent's tool_calls list must be empty after a dry-run")
+        printed = buffer.getvalue()
+        expect("check the battery" in printed and "draft the note" in printed,
+               f"dry-run must print the steps: {printed[:400]!r}")
+        expect("dry-run" in printed.lower(), f"dry-run marker missing: {printed[:400]!r}")
+
+        # without --dry-run the dispatch wires the real execute path (spine authorizer)
+        execute_calls.clear()
+        chain.calls.clear()
+        with contextlib.redirect_stdout(io.StringIO()):
+            code = cli_module._dispatch(["plan", "prepare the weekly report"])
+        expect(code == 0, f"execute-mode exit code: {code}")
+        expect(len(execute_calls) == 1, "execute mode must call execute_plan once")
+        expect(execute_calls[0][1] is access.authorize,
+               "the CLI must pass the real policy spine as the authorizer")
+    finally:
+        brain_pkg.make_brain_chain = saved_factory
+        planner_module.execute_plan = saved_execute
+        config.config_dir = original_cfg
+
+
 def main() -> int:
     check("version string", version_string)
     check("registry builds with 22 tools", registry_built)
@@ -3422,6 +3678,8 @@ def main() -> int:
     check("brain v1: privacy router", lambda: brain_router_v1(tmp_path))
     check("spine bypass attempts", lambda: spine_bypass_attempts(tmp_path))
     check("eval baseline", lambda: eval_baseline(tmp_path))
+    check("brain v2/v3: cascade + planner", lambda: cascade_planner(tmp_path))
+    check("planner CLI: dry-run makes zero tool calls", lambda: planner_dry_run(tmp_path))
 
     check("BrainChain failover", chain_failover)
     check("BrainChain non-transient raises", chain_non_transient_raises)
