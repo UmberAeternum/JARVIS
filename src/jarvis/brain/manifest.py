@@ -62,7 +62,7 @@ BUILTIN_MANIFESTS: list[dict] = [
         "privacy_class": "redact_required",
     },
     {
-        "id": "anthropic/claude-sonnet-4-5",
+        "id": "anthropic/claude-sonnet-5-5",
         "locality": "cloud",
         "context_tokens": 200000,
         "tools": True,

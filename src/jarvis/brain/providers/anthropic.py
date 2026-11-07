@@ -23,7 +23,7 @@ from urllib.parse import urlparse
 from .base import Provider
 
 DEFAULT_BASE_URL = "https://api.anthropic.com"
-DEFAULT_MODEL = "claude-sonnet-4-5"
+DEFAULT_MODEL = "claude-sonnet-5-5"
 API_VERSION = "2023-06-01"
 
 
