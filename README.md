@@ -146,7 +146,7 @@ The Oracle is an informational heuristic against your own recorded baseline. It 
 ## Releases
 
 <!-- RELEASES:BEGIN -->
-- **3.27.0** - jarvis_ai-3.27.0-py3-none-any.whl, UMBRA.exe (see `dist/SHA256SUMS`)
+- **3.29.0** - jarvis_ai-3.29.0-py3-none-any.whl, UMBRA.exe (see `dist/SHA256SUMS`)
 <!-- RELEASES:END -->
 
 ## Support

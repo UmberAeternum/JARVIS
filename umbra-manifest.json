@@ -1,9 +1,9 @@
 {
   "payload": {
-    "version": "3.27.0",
+    "version": "3.29.0",
     "channel": "stable",
-    "notes": "Accessibility, performance budget, and the finished product. The full JARVIS + EDITH assistant: 24 tools on every surface, cascade + planner, memory, briefings, trust dashboard, and the consent protocol.",
-    "url": "https://github.com/UmberAeternum/JARVIS/releases/tag/v3.27.0"
+    "notes": "Phase 10b red-team hardening: checkpoint HMAC, DNS rebinding protection, bundle traversal and revoke-race coverage. Also fixes a Windows-only race where concurrent grants could crash on the access-state write.",
+    "url": "https://github.com/UmberAeternum/JARVIS/releases/tag/v3.29.0"
   },
-  "signature": "4kY/OA/2h6TzETbFF75/YRJRDOMcNc+A6TZHOpQ8EZcwnsxaBggeNzyfvWmbHXgvdX8qWzcLyNudCB68WPIJCA=="
+  "signature": "qYRUAEgqUEv+kSHyXGyQB/M+3jW0D3jcbXzbvO5NXxjbf8YCZWbwph+WgRAyHHKu5y2ztb1NvA9IzjDyLrD6BQ=="
 }
