@@ -87,9 +87,12 @@ chain marks prior entries).
 **How tamper detection works:** each entry chains the SHA-256 of the
 previous one, and a checkpoint file (`access-log.meta.json`, entry count +
 head hash, written after every append) catches edits that leave a
-consistent prefix — including deleting the newest entries. Ledgers created
-before the checkpoint existed verify by chain alone until the next append
-writes the checkpoint.
+consistent prefix — including deleting the newest entries. The checkpoint
+itself is HMAC-signed with a key derived from the device fingerprint, so a
+checkpoint copied from another machine or rewritten by hand fails
+verification — it never silently falls back to the chain-only check.
+Ledgers created before the checkpoint existed verify by chain alone until
+the next append writes the checkpoint.
 
 **Honest threat model:** the machine owner can always edit their own
 files. Replaying an old grant file, forging an expiry, or rewriting the
@@ -98,6 +101,16 @@ protocol defends against automation, accidents, and persistence, not
 against the person sitting at the machine. Concurrent grants race
 (last writer wins); no environment variable or API endpoint can create a
 grant — only typing the confirmation phrase at the CLI.
+
+### What UMBRA does not defend against
+
+| Attack | Why it works | Mitigation |
+|---|---|---|
+| Forged access-state.json (correct fingerprint) | The state file is local; anyone with file access can write it | The protocol targets automation and accidents; the machine owner is trusted |
+| Clock rollback to extend grant expiry | Expiry checks use the system clock | Re-grant after expiry; the 24h window limits exposure |
+| Ledger + checkpoint rewrite (full file access) | Both files are local; the checkpoint HMAC is derived from the device fingerprint, which is also local | Back up the ledger to external media; compare against a known-good copy |
+| Redaction bypass (base64, spaced tokens, unicode escapes, split secrets) | Pattern-based redaction cannot catch encoded or obfuscated secrets | The sensitivity check routes private data to local models; redaction is a backup, not the primary control |
+| Prompt injection via model output (not tool results) | The model's own reply is not a tool result and cannot be pattern-matched | The system prompt instructs the model to treat content as data; evals verify the plumbing |
 
 ## Code signing (status: unsigned builds)
 

@@ -81,6 +81,42 @@ _LOCAL_NAME_SUFFIXES = (
 )
 
 
+def check_endpoint_resolved_ips(url: str, allow_loopback: bool = True) -> tuple[bool, str]:
+    """Resolve the hostname and validate every resolved IP against the SSRF
+    rules. Catches DNS rebinding, decimal/octal/hex IP forms, IPv6 tricks,
+    and userinfo obfuscation that hostname-string checks miss.
+
+    Loopback is allowed (local brains at 127.0.0.1/[::1]). All other
+    private/reserved/link-local addresses are refused. Call BEFORE any SDK
+    or HTTP call to a brain endpoint."""
+    try:
+        parsed = urlparse(url)
+    except ValueError:
+        return False, "unparseable URL"
+    if parsed.scheme not in ("http", "https"):
+        return False, f"scheme must be http/https, got {parsed.scheme!r}"
+    host = parsed.hostname
+    if not host:
+        return False, "missing host"
+    try:
+        infos = socket.getaddrinfo(host, parsed.port or (443 if parsed.scheme == "https" else 80))
+    except OSError as exc:
+        return False, f"cannot resolve {host!r}: {exc}"
+    except socket.gaierror as exc:
+        return False, f"cannot resolve {host!r}: {exc}"
+    for info in infos:
+        addr = ipaddress.ip_address(info[4][0])
+        if addr.is_loopback:
+            if allow_loopback:
+                continue
+            return False, f"loopback {addr} is not allowed for this endpoint"
+        if addr.is_private:
+            return False, f"{host!r} resolves to a private address ({addr})"
+        if addr.is_reserved or addr.is_link_local or addr.is_multicast or addr.is_unspecified:
+            return False, f"{host!r} resolves to a reserved address ({addr})"
+    return True, ""
+
+
 def check_url(url: str, allow_local: bool = False) -> tuple[bool, str]:
     try:
         parsed = urlparse(url)

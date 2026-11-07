@@ -33,6 +33,7 @@ smoke suite.
 from __future__ import annotations
 
 import hashlib
+import hmac
 import json
 import os
 import sys
@@ -107,12 +108,22 @@ def _load_state() -> dict:
 def _save_state(state: dict) -> None:
     """Write the state file ATOMICALLY (temp file + os.replace): concurrent
     grant writers each produce a complete file, so the documented
-    last-write-wins race can never tear the JSON mid-write."""
+    last-write-wins race can never tear the JSON mid-write. On Windows a
+    concurrent reader briefly holds the destination open, which makes
+    os.replace fail with PermissionError (WinError 5); the replace is
+    retried with a short backoff so the race never crashes a grant."""
     path = _state_path()
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_name(f"{path.name}.{os.getpid()}.{threading.get_ident()}.tmp")
     tmp.write_text(json.dumps(state, indent=2), encoding="utf-8")
-    os.replace(str(tmp), str(path))
+    for attempt in range(8):
+        try:
+            os.replace(str(tmp), str(path))
+            break
+        except PermissionError:
+            if attempt == 7:
+                raise
+            time.sleep(0.01 * (attempt + 1))
     if sys.platform != "win32":
         try:
             path.chmod(0o600)
@@ -284,20 +295,58 @@ def _meta_path() -> Path:
     return config.config_dir() / "access-log.meta.json"
 
 
-def _read_meta() -> dict:
+def _checkpoint_key() -> bytes:
+    """HMAC key for the ledger checkpoint, derived from the device fingerprint.
+    The derivation is in the code (not a secret from the machine-owner threat
+    model), but it makes the checkpoint machine-specific: a checkpoint copied
+    from another device won't verify here."""
+    import hashlib as _hl
+
+    return _hl.sha256((device_fingerprint() + ":checkpoint-hmac").encode("utf-8")).digest()
+
+
+def _checkpoint_hmac(meta: dict) -> str:
+    import hashlib as _hl
+    import hmac as _hmac
+
+    canonical = json.dumps(meta, sort_keys=True, separators=(",", ":"))
+    return _hmac.new(_checkpoint_key(), canonical.encode("utf-8"), hashlib.sha256).hexdigest()
+
+
+_META_TAMPERED: dict = {"_tampered": True}
+
+
+def _read_meta() -> dict | None:
+    """The signed checkpoint, or None when there is none (a legacy ledger
+    predating checkpoints - chain-only verification is correct there). A
+    checkpoint that EXISTS but fails its HMAC - rewritten by hand, corrupted,
+    or copied from another machine - is returned as _META_TAMPERED so
+    verification fails instead of silently degrading to the legacy verdict."""
+    path = _meta_path()
+    if not path.is_file():
+        return None
     try:
-        data = json.loads(_meta_path().read_text(encoding="utf-8"))
-        if isinstance(data, dict):
-            return data
+        data = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError):
-        pass
-    return {}
+        return _META_TAMPERED
+    if not isinstance(data, dict):
+        return _META_TAMPERED
+    stored_hmac = data.pop("_hmac", "")
+    expected = _checkpoint_hmac(data)
+    if not hmac.compare_digest(stored_hmac, expected):
+        return _META_TAMPERED
+    return data
 
 
 def _write_meta(meta: dict) -> None:
+    import hashlib as _hl
+    import hmac as _hmac
+
+    canonical = json.dumps(meta, sort_keys=True, separators=(",", ":"))
+    mac = _hmac.new(_checkpoint_key(), canonical.encode("utf-8"), hashlib.sha256).hexdigest()
     path = _meta_path()
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(meta), encoding="utf-8")
+    path.write_text(json.dumps({**meta, "_hmac": mac}), encoding="utf-8")
 
 
 # Appends (and their checkpoint updates) are serialized so concurrent
@@ -368,7 +417,10 @@ def verify_log() -> bool:
     """Ledger integrity: (1) the hash chain verifies entry by entry, and
     (2) when a checkpoint exists, the entry count and head hash match it -
     tail truncation and other edits that leave a consistent prefix are
-    caught by the checkpoint. Ledgers predating the checkpoint (no
+    caught by the checkpoint. The checkpoint itself is HMAC-signed: one that
+    fails its signature (rewritten by hand, corrupted, or copied from
+    another machine) FAILS verification - it never degrades to the legacy
+    chain-only verdict. Ledgers predating the checkpoint (no
     access-log.meta.json yet) verify by chain alone until the next append
     writes the checkpoint - that migration path is deliberate, so an
     upgrade never brands an intact legacy ledger as tampered."""
@@ -376,8 +428,10 @@ def verify_log() -> bool:
     if not all(entry.get("integrity") == "ok" for entry in entries):
         return False
     meta = _read_meta()
-    if not meta:
+    if meta is None:
         return True  # legacy ledger (pre-checkpoint): chain-only verdict above
+    if meta.get("_tampered"):
+        return False  # a checkpoint that exists but fails its HMAC is tampered
     if not entries:
         return False  # checkpoint claims entries; the file has none
     try:

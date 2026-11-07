@@ -107,7 +107,7 @@ class FakeBrain:
 
 
 def version_string() -> None:
-    expect(__version__ == "3.28.0", __version__)
+    expect(__version__ == "3.29.0", __version__)
 
 
 class MockProvider(Provider):
@@ -4383,6 +4383,100 @@ def redteam_brain_endpoints(tmp: Path) -> None:
         config.config_dir = original
 
 
+def phase10b_red_team(tmp: Path) -> None:
+    """Phase 10b - the red-team coverage gaps closed: checkpoint HMAC
+    tamper detection (a checkpoint that exists but fails its HMAC fails
+    verification - no silent legacy fallback), cross-machine checkpoint
+    rejection, brain endpoint DNS resolution (a public-looking hostname
+    rebound to a private address), bundle --out path traversal, and the
+    revoke race (an action after revoke is denied)."""
+    import socket as socket_mod
+
+    from jarvis import access, inject
+    from jarvis.brain import Brain, validate_brain
+    from jarvis.safety import check_endpoint_resolved_ips
+
+    original = config.config_dir
+    config.config_dir = lambda: tmp / "cfg10b"
+    try:
+        # --- 1. checkpoint HMAC: rewriting the checkpoint must fail ---
+        for i in range(3):
+            access.log_append("probe", f"entry {i}")
+        expect(access.verify_log() is True, "a fresh ledger must verify")
+        meta_path = tmp / "cfg10b" / "access-log.meta.json"
+
+        # bump the count but keep the stale HMAC: tampered, NOT "legacy"
+        meta = json.loads(meta_path.read_text(encoding="utf-8"))
+        meta["count"] = 99
+        meta_path.write_text(json.dumps(meta), encoding="utf-8")
+        expect(access.verify_log() is False,
+               "a checkpoint rewritten with a stale HMAC must fail verification")
+
+        # a checkpoint signed with ANOTHER machine's fingerprint key
+        access.log_append("probe", "rewrite checkpoint")
+        head = access.log_entries()[-1]["hash"]
+        saved_fp = access.device_fingerprint
+        try:
+            access.device_fingerprint = lambda: "0123456789abcdef"
+            access._write_meta({"count": 4, "head": head})
+        finally:
+            access.device_fingerprint = saved_fp
+        expect(access.verify_log() is False,
+               "a checkpoint signed on another machine must not verify here")
+
+        # deleting the checkpoint entirely stays the documented legacy path
+        meta_path.unlink()
+        expect(access.verify_log() is True,
+               "a ledger with no checkpoint verifies by chain alone (migration path)")
+
+        # --- 2. brain endpoint: DNS resolution catches rebinding ---
+        saved_getaddrinfo = socket_mod.getaddrinfo
+
+        def _rebound(host, port, *args, **kwargs):
+            if host == "rebound.example.com":
+                return [(socket_mod.AF_INET, socket_mod.SOCK_STREAM, 6, "",
+                         ("10.1.2.3", port))]
+            return saved_getaddrinfo(host, port, *args, **kwargs)
+
+        socket_mod.getaddrinfo = _rebound
+        try:
+            ok, reason = check_endpoint_resolved_ips("http://rebound.example.com/v1")
+            expect(not ok and "private address" in reason,
+                   f"a hostname resolving to a private IP must be refused: {reason}")
+            ok, reason = validate_brain(
+                Brain(base_url="http://rebound.example.com/v1", model="m", api_key="k"))
+            expect(not ok and "endpoint rejected" in reason,
+                   f"validate_brain must refuse the rebound host before any call: {reason}")
+            ok, _ = check_endpoint_resolved_ips("http://localhost:11434/v1")
+            expect(ok, "loopback resolution must stay allowed for local brains")
+        finally:
+            socket_mod.getaddrinfo = saved_getaddrinfo
+
+        # --- 3. bundle --out: path traversal refused before anything is built ---
+        try:
+            inject.build_bundle(tmp / ".." / "escape.zip", None, None)
+        except SystemExit:
+            pass
+        else:
+            raise AssertionError(
+                "BYPASS: bundle --out accepted parent-directory traversal")
+        ok_path = inject.build_bundle(tmp / "b10b.zip", None, None)
+        expect(ok_path.is_file(), "a clean --out path still builds a bundle")
+
+        # --- 4. the revoke race: an action after revoke is denied ---
+        ok, message = access.grant_tiers(["assist"], access.CONFIRMATION_PHRASE)
+        expect(ok is True, message)
+        expect(access.authorize("api.chat")[0] is True, "a live grant must allow")
+        access.revoke_all()
+        allowed, reason = access.authorize("api.chat", actor="user")
+        expect(allowed is False, f"BYPASS: an action after revoke must be denied ({reason})")
+        expect("denied" in reason or "not granted" in reason, f"denial reason: {reason}")
+        expect(any(e.get("action") == "reach_denied" for e in access.log_entries()),
+               "the post-revoke denial must be in the ledger")
+    finally:
+        config.config_dir = original
+
+
 def persona_honorific(tmp: Path) -> None:
     """Phase 10 A3: the personality-pack honorific reaches the agent's
     system prompt; the default is Sir; invalid values fall back to Sir."""
@@ -4521,6 +4615,8 @@ def main() -> int:
           lambda: redteam_api_security(tmp_path))
     check("red-team: brain endpoint guard + doctor hint + no keys",
           lambda: redteam_brain_endpoints(tmp_path))
+    check("phase 10b: checkpoint HMAC, DNS rebinding, bundle traversal, revoke race",
+          lambda: phase10b_red_team(tmp_path))
     check("persona honorific plumbing (default/override/invalid)",
           lambda: persona_honorific(tmp_path))
 

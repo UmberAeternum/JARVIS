@@ -1,10 +1,28 @@
-Phase 2 finish: Anthropic adapter, brain budget, routing evals
+Phase 10b: red-team coverage gaps closed
 
-- brain/providers/anthropic.py: stdlib http.client adapter implementing
-  the Provider interface; reads ANTHROPIC_API_KEY from the environment;
-  keys never logged. Builtin manifest added (redact_required, cloud).
-- jarvis brain budget: shows and sets router budget limits.
-- 6 routing eval scenarios: clean-text-to-local, private-pins-local,
-  cloud-opt-in gate, vision filtering, budget exhaustion, unknown-intent
-  fallback.
-- Version 3.28.0.
+The prior red-team pass had gaps. This commit closes them.
+
+- Checkpoint HMAC: the ledger checkpoint (access-log.meta.json) is now
+  HMAC-SHA256 signed with a key derived from the device fingerprint.
+  Copying a checkpoint from another machine or rewriting it with a
+  different count/head hash will fail the HMAC check - and a checkpoint
+  that is present but fails its signature now FAILS verification instead
+  of silently degrading to the legacy chain-only verdict. Honest scope:
+  the derivation is in the code, so a determined local attacker can still
+  recompute it — the improvement is against accidental corruption,
+  cross-machine copying, and unsophisticated tampering.
+- Brain endpoint DNS resolution: validate_brain now calls
+  safety.check_endpoint_resolved_ips() (added to safety.py) which
+  resolves the hostname via getaddrinfo and validates every resolved IP
+  against the SSRF rules — catching DNS rebinding, decimal/octal/hex IP
+  forms, and IPv6 tricks that hostname-string checks miss. Loopback
+  stays allowed for local brains.
+- Inject bundle: the --out path is validated against path traversal
+  (parent-directory components are refused).
+- New red-team tests: checkpoint HMAC tamper detection, cross-machine
+  checkpoint rejection, brain endpoint resolution to private IPs (DNS
+  rebinding defense), bundle path traversal, grant expiry race (action
+  after revoke = denied).
+- SUPPORT.md: "What UMBRA does not defend against" table documenting
+  machine-owner attacks, redaction limitations, and the checkpoint scope.
+- Version 3.29.0.

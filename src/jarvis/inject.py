@@ -333,6 +333,12 @@ def locate_artifacts() -> tuple[Path | None, Path | None]:
 def build_bundle(out: Path, wheel: Path | None, exe: Path | None) -> Path:
     """Offline installer zip. Public key text comes from the package itself;
     this function never touches any private-key folder."""
+    # Phase 10b: --out must stay where the caller asked - a parent-directory
+    # component would let a crafted path drop the bundle outside the target
+    # folder. Refused before anything is created.
+    if ".." in out.parts:
+        raise SystemExit(
+            "bundle --out refused: parent-directory components are not allowed")
     from . import __version__
     from .licensing import PUBLIC_KEY_B64
 

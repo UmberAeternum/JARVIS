@@ -112,11 +112,13 @@ class Brain:
 
 
 def validate_brain(brain: Brain) -> tuple[bool, str]:
-    """Prove the endpoint is policy-clean, then one tiny live call to prove
-    endpoint + key + model work. The endpoint guard runs BEFORE any network
-    traffic: private/reserved addresses (e.g. the cloud-metadata endpoint
-    169.254.169.254) are refused without a single packet leaving."""
+    """Prove the endpoint is policy-clean (including DNS resolution to catch
+    rebinding and IP-form tricks), then one tiny live call to prove endpoint
+    + key + model work. The endpoint guard runs BEFORE any network traffic."""
     ok, reason = safety.check_brain_endpoint(brain.base_url)
+    if not ok:
+        return False, f"endpoint rejected: {reason}"
+    ok, reason = safety.check_endpoint_resolved_ips(brain.base_url, allow_loopback=True)
     if not ok:
         return False, f"endpoint rejected: {reason}"
     try:
