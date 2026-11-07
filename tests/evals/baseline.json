@@ -110,11 +110,9 @@
     {
       "id": "persona-002",
       "category": "persona",
-      "passed": false,
-      "known_failure": true,
-      "failures": [
-        "system_prompt_contains: system prompt missing 'Captain'"
-      ],
+      "passed": true,
+      "known_failure": false,
+      "failures": [],
       "latency_ms": 0
     },
     {

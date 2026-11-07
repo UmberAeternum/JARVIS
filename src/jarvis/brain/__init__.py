@@ -112,7 +112,13 @@ class Brain:
 
 
 def validate_brain(brain: Brain) -> tuple[bool, str]:
-    """One tiny live call to prove the endpoint + key + model work."""
+    """Prove the endpoint is policy-clean, then one tiny live call to prove
+    endpoint + key + model work. The endpoint guard runs BEFORE any network
+    traffic: private/reserved addresses (e.g. the cloud-metadata endpoint
+    169.254.169.254) are refused without a single packet leaving."""
+    ok, reason = safety.check_brain_endpoint(brain.base_url)
+    if not ok:
+        return False, f"endpoint rejected: {reason}"
     try:
         client = brain.client()
         resp = client.chat.completions.create(

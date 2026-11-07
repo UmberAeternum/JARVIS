@@ -49,8 +49,11 @@ SCAN_PORT_LABELS = {
 }
 
 # strict target charset: [user@]host - the ONLY user data that reaches a
-# remote command line, and only as the ssh login target argument.
+# remote command line, and only as the ssh login target argument. Length is
+# capped at the DNS hostname maximum (253) so absurd padding cannot smuggle
+# past eyeballs or downstream tooling.
 _SAFE_TARGET = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*(?:@[A-Za-z0-9][A-Za-z0-9._-]*)?$")
+MAX_TARGET_LEN = 253
 
 # remote installer commands are constants - never assembled from user input
 _WIN_INSTALL_CMD = "powershell -NoProfile -ExecutionPolicy Bypass -File umbra-install/install-umbra.ps1"
@@ -60,6 +63,11 @@ _LIN_INSTALL_UNIT_CMD = "bash /tmp/install-umbra.sh --user-unit"
 
 def validated_target(target: str) -> str:
     target = (target or "").strip()
+    if len(target) > MAX_TARGET_LEN:
+        raise SystemExit(
+            f"invalid target {target[:60]!r}... - target too long "
+            f"(max {MAX_TARGET_LEN} characters)"
+        )
     match = _SAFE_TARGET.fullmatch(target)
     if not match:
         raise SystemExit(

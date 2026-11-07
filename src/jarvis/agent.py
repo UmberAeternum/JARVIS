@@ -31,6 +31,9 @@ class Agent:
         self.on_status = on_status or (lambda status: None)
         self.max_tool_iterations = max(1, int(max_tool_iterations))
         self.max_tokens_per_turn = max(1000, int(max_tokens_per_turn))
+        # system_prompt.build() loads the personality-pack honorific (default
+        # "Sir") at construction time, so every agent surface (CLI, API,
+        # overlay, dashboard, evals) speaks the user's chosen form of address.
         self.messages: list[dict] = [{"role": "system", "content": system_prompt.build()}]
 
     def reset(self) -> None:

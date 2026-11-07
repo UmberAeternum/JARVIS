@@ -14,20 +14,29 @@ confirmation phrase. The grant:
 
 Every cross-device / cross-app action is written to an append-only,
 tamper-evident ledger (<config>/access-log.jsonl): each entry chains the
-SHA-256 of the previous entry, so edits are detectable. `jarvis access log`
-prints it; `jarvis access revoke --all` clears the grant instantly.
+SHA-256 of the previous entry, so edits are detectable, and a checkpoint
+file (access-log.meta.json: entry count + head hash, written after every
+append) catches edits that leave a consistent prefix - including tail
+truncation and clock-rollback replays of an old grant state. `jarvis
+access log` prints it; `jarvis access verify` checks it; `jarvis access
+revoke --all` clears the grant instantly.
 
-Honest threat model: the machine owner can always edit their own files - the
-protocol's controls target automation, accidents, and persistence, not a
-user attacking their own box. Hard prohibitions (no self-propagation, no
-silent grants, no bypass) are test-enforced in the smoke suite.
+Honest threat model: the machine owner can always edit their own files -
+including replaying an old grant file, rolling the clock forward inside a
+forged expiry, or rewriting both the state and the ledger AND the
+checkpoint. The protocol's controls target automation, accidents, and
+persistence, not a user attacking their own box. Hard prohibitions (no
+self-propagation, no silent grants, no bypass) are test-enforced in the
+smoke suite.
 """
 
 from __future__ import annotations
 
 import hashlib
 import json
+import os
 import sys
+import threading
 import time
 from pathlib import Path
 
@@ -96,9 +105,14 @@ def _load_state() -> dict:
 
 
 def _save_state(state: dict) -> None:
+    """Write the state file ATOMICALLY (temp file + os.replace): concurrent
+    grant writers each produce a complete file, so the documented
+    last-write-wins race can never tear the JSON mid-write."""
     path = _state_path()
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(state, indent=2), encoding="utf-8")
+    tmp = path.with_name(f"{path.name}.{os.getpid()}.{threading.get_ident()}.tmp")
+    tmp.write_text(json.dumps(state, indent=2), encoding="utf-8")
+    os.replace(str(tmp), str(path))
     if sys.platform != "win32":
         try:
             path.chmod(0o600)
@@ -260,29 +274,66 @@ def _entry_hash(prev_hash: str, entry: dict) -> str:
     return hashlib.sha256((prev_hash + canonical).encode("utf-8")).hexdigest()
 
 
-def log_append(action: str, detail: str, actor: str = "user") -> None:
-    """Append one tamper-evident entry (chained hashes). Never raises.
-    The actor (user | api | overlay | agent) is part of the signed entry."""
+def _meta_path() -> Path:
+    """The ledger's checkpoint: entry count + head hash, written atomically
+    after every append. Hash chaining alone cannot detect tail truncation
+    (a consistent prefix verifies), so the checkpoint is the second anchor:
+    a ledger whose length or head does not match the checkpoint is
+    tampered, full stop. The checkpoint is metadata, not a grant - it can
+    never create reach."""
+    return config.config_dir() / "access-log.meta.json"
+
+
+def _read_meta() -> dict:
     try:
-        path = _log_path()
-        path.parent.mkdir(parents=True, exist_ok=True)
-        prev_hash = "0" * 64
-        if path.is_file():
-            lines = [line for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
-            if lines:
-                try:
-                    prev_hash = json.loads(lines[-1]).get("hash", prev_hash)
-                except ValueError:
-                    prev_hash = "0" * 64
-        entry = {
-            "ts": time.strftime("%Y-%m-%dT%H:%M:%S"),
-            "action": action,
-            "detail": detail,
-            "actor": actor,
-        }
-        entry["hash"] = _entry_hash(prev_hash, entry)
-        with path.open("a", encoding="utf-8") as fh:
-            fh.write(json.dumps(entry, ensure_ascii=False) + "\n")
+        data = json.loads(_meta_path().read_text(encoding="utf-8"))
+        if isinstance(data, dict):
+            return data
+    except (OSError, ValueError):
+        pass
+    return {}
+
+
+def _write_meta(meta: dict) -> None:
+    path = _meta_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(meta), encoding="utf-8")
+
+
+# Appends (and their checkpoint updates) are serialized so concurrent
+# threads cannot interleave a stale count/head into the checkpoint.
+_LOG_LOCK = threading.Lock()
+
+
+def log_append(action: str, detail: str, actor: str = "user") -> None:
+    """Append one tamper-evident entry (chained hashes + checkpoint). Never
+    raises. The actor (user | api | overlay | agent) is part of the signed
+    entry."""
+    try:
+        with _LOG_LOCK:
+            path = _log_path()
+            path.parent.mkdir(parents=True, exist_ok=True)
+            prev_hash = "0" * 64
+            if path.is_file():
+                lines = [line for line in path.read_text(encoding="utf-8").splitlines()
+                         if line.strip()]
+                if lines:
+                    try:
+                        prev_hash = json.loads(lines[-1]).get("hash", prev_hash)
+                    except ValueError:
+                        prev_hash = "0" * 64
+            entry = {
+                "ts": time.strftime("%Y-%m-%dT%H:%M:%S"),
+                "action": action,
+                "detail": detail,
+                "actor": actor,
+            }
+            entry["hash"] = _entry_hash(prev_hash, entry)
+            with path.open("a", encoding="utf-8") as fh:
+                fh.write(json.dumps(entry, ensure_ascii=False) + "\n")
+            lines = [line for line in path.read_text(encoding="utf-8").splitlines()
+                     if line.strip()]
+            _write_meta({"count": len(lines), "head": entry["hash"]})
     except OSError:
         pass  # the ledger must never break the caller
 
@@ -307,10 +358,32 @@ def log_entries() -> list[dict]:
         stored = entry.pop("hash", "")
         expected = _entry_hash(prev, entry)
         entry["integrity"] = "ok" if stored == expected else "TAMPERED"
+        entry["hash"] = stored  # kept for verify_log's checkpoint match
         prev = stored
         entries.append(entry)
     return entries
 
 
 def verify_log() -> bool:
-    return all(entry.get("integrity") == "ok" for entry in log_entries()) if log_entries() else True
+    """Ledger integrity: (1) the hash chain verifies entry by entry, and
+    (2) when a checkpoint exists, the entry count and head hash match it -
+    tail truncation and other edits that leave a consistent prefix are
+    caught by the checkpoint. Ledgers predating the checkpoint (no
+    access-log.meta.json yet) verify by chain alone until the next append
+    writes the checkpoint - that migration path is deliberate, so an
+    upgrade never brands an intact legacy ledger as tampered."""
+    entries = log_entries()
+    if not all(entry.get("integrity") == "ok" for entry in entries):
+        return False
+    meta = _read_meta()
+    if not meta:
+        return True  # legacy ledger (pre-checkpoint): chain-only verdict above
+    if not entries:
+        return False  # checkpoint claims entries; the file has none
+    try:
+        count = int(meta.get("count", -1))
+    except (TypeError, ValueError):
+        return False
+    if count != len(entries) or meta.get("head") != entries[-1].get("hash"):
+        return False
+    return True

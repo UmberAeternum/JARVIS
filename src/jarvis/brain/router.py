@@ -61,7 +61,16 @@ def classify(text: str) -> str:
 def redact_for_cloud(text: str) -> str:
     """Redaction gate before any cloud call: strip paths, emails, key
     shapes, and license keys. Screen content cannot be reconstructed - the
-    caller must exclude it upstream."""
+    caller must exclude it upstream.
+
+    Known limitations (documented in SUPPORT.md, phase-10 red-team pass):
+    the pattern set is literal and per-line, so it does NOT catch
+    base64/hex-encoded secrets, secrets broken up by spaces or newlines,
+    or unicode-escape forms. Defense in depth stays the sensitivity gate
+    (is_sensitive marks the request private and pins it to private_ok
+    models) and the user's own judgment - redaction is a best-effort
+    scrubber, not a DLP engine.
+    """
     out = text or ""
     out = re.sub(r"[A-Za-z]:\\[^\s\"']+", "[REDACTED-PATH]", out)
     out = re.sub(r"(?<!\w)/(?:home|Users|root)/[^\s\"']+", "[REDACTED-PATH]", out)

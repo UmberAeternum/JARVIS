@@ -24,6 +24,9 @@ FIXES = {
               "jarvis setup --yes --local --base-url http://localhost:11434/v1 --model <model>",
     "model": "pull it with [bold]ollama pull <model>[/] or switch with "
              "jarvis settings set brains.primary.model=<model>",
+    "endpoint": "re-run [bold]jarvis setup[/] with a public https endpoint or a local "
+                "server (http://localhost:11434/v1) - private/reserved addresses such "
+                "as 169.254.169.254 or 10.x.x.x are refused as brain endpoints",
     "updates": "offline is fine - this only disables the update check until the "
                "network returns",
     "ledger": "jarvis access log shows the corrupted line - restore it from a backup "
@@ -58,11 +61,17 @@ def _check_license(console) -> tuple[bool, str]:
 
 def _check_brain(console) -> tuple[bool, str]:
     from .brain import discover_local_servers, list_ollama_models
+    from .safety import check_brain_endpoint
 
     cfg = config.Config.load()
     if cfg is None:
         return False, "no config - " + FIXES["config"]
     primary = cfg.brains.primary
+    if primary.base_url:
+        endpoint_ok, endpoint_reason = check_brain_endpoint(primary.base_url)
+        if not endpoint_ok:
+            return False, (f"brain endpoint refused: {endpoint_reason} - "
+                           + FIXES["endpoint"])
     if primary.type != "local":
         key = primary.api_key or config.load_key("primary") or ""
         return (bool(primary.api_key),

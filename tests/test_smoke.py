@@ -3958,6 +3958,468 @@ def planner_dry_run(tmp: Path) -> None:
         config.config_dir = original_cfg
 
 
+def redteam_pro_hint_no_execution() -> None:
+    """Phase 10 A1/B1: screen_click is absent from the LITE registry, so the
+    agent loop's dispatch returns the PRO hint and the tool body NEVER
+    executes - proven with a spy on screen_tools._pyautogui."""
+    import jarvis.screen_tools as screen_tools
+
+    invocations: list = []
+    original_loader = screen_tools._pyautogui
+
+    def spy_loader():
+        invocations.append(True)
+        return original_loader()
+
+    screen_tools._pyautogui = spy_loader
+    try:
+        reg = default_registry(confirm=lambda d: False, allow_screen_control=False)
+        expect("screen_click" not in reg.descriptions(),
+               "screen tools must be absent from the default (LITE) registry")
+
+        # direct dispatch: the PRO hint, no execution
+        out = reg.dispatch("screen_click", json.dumps({"x": 5, "y": 5}))
+        expect("PRO feature" in out, f"dispatch must surface the PRO hint: {out!r}")
+
+        # through the real agent loop: scripted model calls screen_click
+        responses = [
+            FakeResp(FakeMsg("", tool_calls=[
+                fake_tool_call("t1", "screen_click", '{"x": 5, "y": 5}')])),
+        ]
+        chain = types.SimpleNamespace(
+            create_chat=lambda **kw: responses.pop(0) if responses else FakeResp(FakeMsg("reported")))
+        agent = Agent(chain, reg)
+        agent.run_turn("click the button")
+        tool_results = [m.get("content", "") for m in agent.messages if m.get("role") == "tool"]
+        expect(any("PRO feature" in r for r in tool_results),
+               f"the tool channel must carry the PRO hint: {tool_results}")
+        expect(not invocations,
+               f"BYPASS: the screen_click body executed {len(invocations)}x "
+               "while absent from the registry")
+    finally:
+        screen_tools._pyautogui = original_loader
+
+
+def redteam_pro_direct_call_and_scaffold(tmp: Path) -> None:
+    """Phase 10 B1: calling a PRO tool function DIRECTLY (import + call,
+    skipping dispatch) still hits the confirm gate; plugin scaffolds
+    generate code that references no tool execution path."""
+    from jarvis.plugins import scaffold_browser, scaffold_vscode
+
+    reg = default_registry(confirm=lambda d: False, allow_screen_control=True)
+    handler = reg._handlers["screen_click"]
+    out = handler(x=11, y=22)
+    expect(out.startswith("BLOCKED"),
+           f"the confirm gate must hold on a direct function call: {out}")
+    out = reg._handlers["screen_type"](text="hello")
+    expect(out.startswith("BLOCKED"), f"screen_type direct call must block: {out}")
+
+    for scaffold in (scaffold_vscode, scaffold_browser):
+        folder = tmp / f"scf-{scaffold.__name__}"
+        files = scaffold(folder)
+        expect(files, f"{scaffold.__name__} must produce files")
+        for path in files:
+            text = path.read_text(encoding="utf-8")
+            for forbidden in ("screen_click", "screen_type", "registry.dispatch",
+                              "_handlers", "exec(", "eval("):
+                expect(forbidden not in text,
+                       f"scaffold output must not reference tool execution: "
+                       f"{path.name} contains {forbidden!r}")
+
+
+def redteam_grant_bypasses(tmp: Path) -> None:
+    """Phase 10 B2: grant bypass attempts. Forged-file and clock cases that
+    DO activate are the documented machine-owner threat model; everything
+    else must fail."""
+    import http.client
+
+    from jarvis import access
+    from jarvis import api as api_mod
+
+    original = config.config_dir
+    config.config_dir = lambda: tmp / "cfggrant"
+    try:
+        # the threat model itself must stay documented in the module
+        doc = access.__doc__ or ""
+        expect("machine owner can always edit their own files" in doc,
+               "the machine-owner threat model must stay documented")
+
+        # 1. forged state WITH the correct fingerprint: activates (documented)
+        access.revoke_all()
+        access._save_state({"grants": {"install": {"ts": 0, "expires_ts": time.time() + 3600}},
+                            "fingerprint": access.device_fingerprint()})
+        expect(access.full_active() is True,
+               "documented: a hand-forged file with a matching fingerprint activates")
+
+        # 2. replaying an OLD (expired) grant file: must stay inactive
+        access.revoke_all()
+        access._save_state({"grants": {"install": {"ts": 0, "expires_ts": time.time() - 10}},
+                            "fingerprint": access.device_fingerprint()})
+        expect(access.full_active() is False, "an expired grant replay must not activate")
+
+        # 3. clock rollback inside a forged expiry: activates (documented)
+        access._save_state({"grants": {"install": {"ts": 0, "expires_ts": time.time() + 10**9}},
+                            "fingerprint": access.device_fingerprint()})
+        expect(access.full_active() is True,
+               "documented: the owner can write any expiry they like")
+
+        # 4. no environment variable can grant
+        access.revoke_all()
+        import os as os_mod
+
+        saved = {name: os_mod.environ.get(name) for name in
+                 ("UMBRA_FULL_ACCESS", "EDITH_GRANT", "JARVIS_ACCESS_GRANT")}
+        for name in saved:
+            os_mod.environ[name] = "1"
+        try:
+            expect(access.full_active() is False, "env vars must not grant")
+            allowed, _ = access.authorize("inject.install", target="h")
+            expect(not allowed, "env vars must not bypass authorize")
+            source = Path(access.__file__).read_text(encoding="utf-8")
+            expect("os.environ" not in source,
+                   "access.py must not read environment variables in the grant path")
+        finally:
+            for name, value in saved.items():
+                if value is None:
+                    os_mod.environ.pop(name, None)
+                else:
+                    os_mod.environ[name] = value
+
+        # 5. no grant endpoint exists in the API
+        state = api_mod.ApiState(config.Config())
+        state.agent.chain = types.SimpleNamespace(
+            create_chat=lambda **kw: FakeResp(FakeMsg("nope")))
+        server, port, thread = api_mod.start_server(state, preferred_port=0)
+        conn = http.client.HTTPConnection("127.0.0.1", port, timeout=10)
+        try:
+            token = api_mod.ensure_token()
+            conn.request("POST", "/grant",
+                         body=json.dumps({"phrase": access.CONFIRMATION_PHRASE}),
+                         headers={"X-Jarvis-Token": token, "Content-Type": "application/json"})
+            resp = conn.getresponse()
+            resp.read()
+            expect(resp.status == 404, f"a grant endpoint must not exist: {resp.status}")
+            expect(access.full_active() is False, "the API cannot create a grant")
+        finally:
+            conn.close()
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=5)
+
+        # 6. planner steps: an act-tier step with no act grant is denied by authorize
+        from jarvis.planner import execute_plan
+
+        access.revoke_all()
+        plan_results = execute_plan([{"step": "delete the staging file", "requires": "act"}],
+                                    access.authorize, confirm=None)
+        expect(plan_results and plan_results[0]["status"] == "denied",
+               f"an ungranted act step must be denied by authorize: {plan_results}")
+
+        # 7. concurrent grants: last write wins, the state file stays valid (documented)
+        access.revoke_all()
+        errors: list[str] = []
+
+        def _grant(tier: str) -> None:
+            try:
+                access.grant_tiers([tier], access.CONFIRMATION_PHRASE)
+            except Exception as exc:  # noqa: BLE001
+                errors.append(f"{type(exc).__name__}: {exc}")
+
+        racers = [threading.Thread(target=_grant, args=(tier,))
+                  for tier in ("observe", "assist", "act")]
+        for racer in racers:
+            racer.start()
+        for racer in racers:
+            racer.join()
+        expect(not errors, f"concurrent grants must not crash: {errors}")
+        loaded = json.loads((tmp / "cfggrant" / "access-state.json").read_text(encoding="utf-8"))
+        expect(loaded.get("fingerprint") == access.device_fingerprint(),
+               "the race must leave a valid state file (last write wins)")
+        expect(any(tier["granted"] for tier in access.tier_snapshot().values()),
+               "one of the racing grants won (documented: last write wins)")
+    finally:
+        config.config_dir = original
+
+
+def redteam_ledger_tamper(tmp: Path) -> None:
+    """Phase 10 B3: every edit to the ledger is detected - including tail
+    truncation, which hash chaining alone cannot see (the checkpoint file
+    catches it)."""
+    from jarvis import access
+
+    original = config.config_dir
+    config.config_dir = lambda: tmp / "cfgledger"
+    log_path = tmp / "cfgledger" / "access-log.jsonl"
+    try:
+        for i in range(3):
+            access.log_append("probe", f"entry {i}")
+        expect(access.verify_log() is True, "a freshly appended ledger must verify")
+        good = log_path.read_text(encoding="utf-8")
+        lines = good.splitlines()
+
+        def _restore() -> None:
+            log_path.write_text(good, encoding="utf-8")
+
+        # 1. truncate: remove the last line
+        log_path.write_text("\n".join(lines[:-1]) + "\n", encoding="utf-8")
+        expect(access.verify_log() is False,
+               "tail truncation must be detected (checkpoint count/head mismatch)")
+
+        # 2. reorder: swap two lines
+        _restore()
+        swapped = lines[:]
+        swapped[0], swapped[1] = swapped[1], swapped[0]
+        log_path.write_text("\n".join(swapped) + "\n", encoding="utf-8")
+        expect(access.verify_log() is False, "reordering must break the chain")
+
+        # 3. delete: remove a middle line
+        _restore()
+        log_path.write_text("\n".join(lines[:1] + lines[2:]) + "\n", encoding="utf-8")
+        expect(access.verify_log() is False, "deleting a middle line must break the chain")
+
+        # 4. forge: append a new entry with a fake hash
+        _restore()
+        forged = json.dumps({"ts": "t", "action": "forged", "detail": "x",
+                             "actor": "user", "hash": "f" * 64})
+        log_path.write_text(good + forged + "\n", encoding="utf-8")
+        expect(access.verify_log() is False, "a forged append must be detected")
+
+        # 5. modify: change the detail text of an existing entry
+        _restore()
+        entry = json.loads(lines[1])
+        entry["detail"] = "edited by an attacker"
+        modified = lines[:]
+        modified[1] = json.dumps(entry)
+        log_path.write_text("\n".join(modified) + "\n", encoding="utf-8")
+        expect(access.verify_log() is False, "a detail edit must break the entry hash")
+
+        # legacy migration: a pre-checkpoint ledger still verifies by chain alone
+        _restore()
+        (tmp / "cfgledger" / "access-log.meta.json").unlink()
+        expect(access.verify_log() is True, "a legacy chain-only ledger must verify")
+    finally:
+        config.config_dir = original
+
+
+def redteam_inject_targets() -> None:
+    """Phase 10 B4: validated_target refuses every injection shape."""
+    from jarvis.inject import validated_target
+
+    attacks = [
+        "host; rm -rf /",           # shell separator
+        "host && malicious",        # shell and-list
+        "$(dangerous)",             # command substitution
+        "host\nmalicious",          # newline not in the charset
+        "--flag",                   # leading dash (option injection)
+        "http://evil.com",          # colon/slash not in the charset
+        "../traversal",             # path traversal
+        "",                         # empty
+        "host -oProxyCommand=evil", # ssh option smuggling
+        "a" * 1000,                 # absurd length (charset-valid, still refused)
+    ]
+    for target in attacks:
+        try:
+            validated_target(target)
+            expect(False, f"BYPASS: {target[:40]!r} was accepted as a target")
+        except SystemExit:
+            pass  # refusal is the required behavior
+    expect(validated_target("umbra@192.168.1.50") == "umbra@192.168.1.50",
+           "legitimate targets still pass")
+
+
+def redteam_redaction_limits(tmp: Path) -> None:
+    """Phase 10 B6: document what the redaction gate does NOT catch. The
+    pattern set is literal and per-line, so encoded/spaced/escaped/split
+    secrets pass through - a documented limitation (SUPPORT.md), defended
+    in depth by the sensitivity gate (private_ok pinning)."""
+    from jarvis.brain.router import redact_for_cloud
+
+    secrets = {
+        "base64": "c2VjcmV0RGF0YQ==",
+        "spaced token": "s k - a b c",
+        "unicode escapes": "\\u0041\\u0049\\u007a\\u0061",
+        "split across lines": "sk-abc\n12345678",
+    }
+    for label, secret in secrets.items():
+        cleaned = redact_for_cloud(f"please store {secret} safely")
+        expect(secret in cleaned,
+               f"KNOWN LIMITATION regression: {label} is now caught - "
+               "update SUPPORT.md and this test")
+    support = (Path(__file__).resolve().parents[1] / "SUPPORT.md").read_text(encoding="utf-8")
+    for needle in ("Encoded secrets", "Spaced-out tokens", "Unicode escapes",
+                   "Split across lines"):
+        expect(needle in support,
+               f"SUPPORT.md must document the redaction limitation: {needle}")
+
+
+def redteam_api_security(tmp: Path) -> None:
+    """Phase 10 B7: the API never leaks the token, never sets CORS headers,
+    binds loopback only, and compares tokens in constant time."""
+    import contextlib
+    import http.client
+    import inspect
+    import io
+
+    from jarvis import api as api_mod
+
+    original = config.config_dir
+    config.config_dir = lambda: tmp / "cfgapisec"
+    try:
+        token = api_mod.ensure_token()
+        state = api_mod.ApiState(config.Config())
+        state.agent.chain = types.SimpleNamespace(
+            create_chat=lambda **kw: FakeResp(FakeMsg("hi")))
+        server, port, thread = api_mod.start_server(state, preferred_port=0)
+        conn = http.client.HTTPConnection("127.0.0.1", port, timeout=10)
+        try:
+            expect(server.server_address[0] == "127.0.0.1",
+                   f"the API must bind 127.0.0.1, got {server.server_address[0]}")
+
+            # invalid token: 403, and the body must NOT echo the real token
+            conn.request("GET", "/tools", headers={"X-Jarvis-Token": "attacker-guess"})
+            resp = conn.getresponse()
+            body = resp.read().decode("utf-8")
+            expect(resp.status == 403, f"an invalid token must be refused: {resp.status}")
+            expect(token not in body, "the 403 body must not leak the real token")
+
+            # CORS: no cross-origin header on success or failure
+            conn.request("GET", "/health", headers={"X-Jarvis-Token": token})
+            resp = conn.getresponse()
+            resp.read()
+            expect("access-control-allow-origin" not in
+                   {name.lower() for name, _value in resp.getheaders()},
+                   "the API must not set CORS headers")
+            conn.request("GET", "/tools", headers={"X-Jarvis-Token": "wrong"})
+            resp = conn.getresponse()
+            resp.read()
+            expect("access-control-allow-origin" not in
+                   {name.lower() for name, _value in resp.getheaders()}, "no CORS on a 403 either")
+
+            # the token never reaches stderr (BaseHTTPRequestHandler logs there)
+            captured_err = io.StringIO()
+            with contextlib.redirect_stderr(captured_err):
+                conn.request("GET", "/tools", headers={"X-Jarvis-Token": "wrong"})
+                resp = conn.getresponse()
+                resp.read()
+            expect(token not in captured_err.getvalue(),
+                   "the token must never reach logs/stderr")
+
+            # constant-time comparison; request logging stays silenced
+            source = inspect.getsource(api_mod)
+            expect("compare_digest" in source,
+                   "the token check must use secrets.compare_digest")
+            expect("Access-Control-Allow-Origin" not in source,
+                   "no CORS anywhere in the API source")
+            expect("def log_message" in source,
+                   "request logging must stay silenced (no token in access logs)")
+        finally:
+            conn.close()
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=5)
+    finally:
+        config.config_dir = original
+
+
+def redteam_brain_endpoints(tmp: Path) -> None:
+    """Phase 10 B8: the brain endpoint guard refuses internal targets before
+    any network traffic; doctor prints the fix hint; brain status never
+    shows key material."""
+    import contextlib
+    import io
+
+    from rich.console import Console
+
+    from jarvis import doctor
+    from jarvis.brain import Brain, validate_brain
+    from jarvis.safety import check_brain_endpoint
+
+    # AWS metadata endpoint: refused by the guard, zero packets sent
+    ok, reason = validate_brain(Brain(base_url="http://169.254.169.254/v1",
+                                      model="m", api_key="k"))
+    expect(not ok and "endpoint rejected" in reason,
+           f"the metadata endpoint must be refused: {reason}")
+    ok, reason = check_brain_endpoint("http://10.0.0.5/v1")
+    expect(not ok, f"a private LAN IP must be refused: {reason}")
+    ok, _ = check_brain_endpoint("http://localhost:11434/v1")
+    expect(ok, "a localhost brain must stay allowed")
+    ok, _ = check_brain_endpoint("https://api.openai.com/v1")
+    expect(ok, "a public domain must stay allowed")
+
+    # wrong-port localhost: the guard passes, reachability fails (live call)
+    ok, reason = validate_brain(Brain(base_url="http://localhost:9999/v1",
+                                      model="m", api_key="k"))
+    expect(not ok and "endpoint rejected" not in reason,
+           f"localhost:9999 must fail at reachability, not the guard: {reason}")
+
+    # doctor prints the fix hint for the refused endpoint
+    original = config.config_dir
+    config.config_dir = lambda: tmp / "cfgbraindoc"
+    try:
+        config.Config(brains=config.BrainsConfig(
+            primary=config.BrainConfig(type="cloud", provider="custom",
+                                       base_url="http://169.254.169.254/v1",
+                                       model="m", api_key=FAKE_KEY))).save()
+        out = io.StringIO()
+        code = doctor.run_doctor(Console(file=out, force_terminal=False))
+        expect(code == 0, "doctor exits 0 (it is a report, not a gate)")
+        text = out.getvalue()
+        expect("FAIL" in text and "brain endpoint refused" in text,
+               f"doctor must flag the endpoint: {text[:400]!r}")
+        expect("jarvis setup" in text, "the fix hint must be printed")
+        expect(FAKE_KEY not in text, "doctor output must not echo key material")
+
+        # jarvis brain status: no key material in the output
+        import jarvis.cli as cli_module
+
+        buffer = io.StringIO()
+        with contextlib.redirect_stdout(buffer):
+            status_code = cli_module._dispatch(["brain", "status"])
+        status_text = buffer.getvalue()
+        expect(status_code == 0, f"brain status exit code: {status_code}")
+        expect(FAKE_KEY not in status_text and "sk-" not in status_text,
+               f"brain status must not print key material: {status_text[:300]!r}")
+    finally:
+        config.config_dir = original
+
+
+def persona_honorific(tmp: Path) -> None:
+    """Phase 10 A3: the personality-pack honorific reaches the agent's
+    system prompt; the default is Sir; invalid values fall back to Sir."""
+    from jarvis import personality, system_prompt
+
+    original = config.config_dir
+    config.config_dir = lambda: tmp / "cfgpersona"
+    try:
+        # 1. default: Sir, in both the persona block and the status line
+        text = system_prompt.build()
+        expect('Address the user as "Sir"' in text, f"default honorific: {text[:220]!r}")
+        expect("Awaiting command, Sir." in text, "the status line keeps the default")
+
+        # 2. after personality.save({"honorific": "Captain"}), the agent's
+        #    system prompt says Captain and Sir is gone
+        personality.save({"honorific": "Captain"})
+        agent = Agent(FakeStreamChain([], "At your service, Captain."),
+                      default_registry(confirm=lambda d: False))
+        prompt = agent.messages[0]["content"]
+        expect('Address the user as "Captain"' in prompt,
+               f"the override must reach the prompt: {prompt[:220]!r}")
+        expect("Awaiting command, Captain." in prompt, "the status line follows the override")
+        expect("Sir" not in prompt,
+               f"the default must not survive the override: {prompt[:300]!r}")
+
+        # 3. invalid honorific values fall back to Sir
+        cfg_dir = tmp / "cfgpersona"
+        for bad in ("", "x" * 25, 123, None):
+            cfg_dir.joinpath("personality.json").write_text(
+                json.dumps({"honorific": bad}), encoding="utf-8")
+            text = system_prompt.build()
+            expect('Address the user as "Sir"' in text,
+                   f"an invalid honorific {bad!r} must fall back to Sir")
+    finally:
+        config.config_dir = original
+
+
 def main() -> int:
     check("version string", version_string)
     check("registry builds with 22 tools", registry_built)
@@ -4048,6 +4510,19 @@ def main() -> int:
     check("routing evals", lambda: routing_evals(tmp_path))
     check("brain v2/v3: cascade + planner", lambda: cascade_planner(tmp_path))
     check("planner CLI: dry-run makes zero tool calls", lambda: planner_dry_run(tmp_path))
+    check("red-team: PRO hint, tool body never executes", redteam_pro_hint_no_execution)
+    check("red-team: direct PRO call + scaffold execution paths",
+          lambda: redteam_pro_direct_call_and_scaffold(tmp_path))
+    check("red-team: grant bypass attempts", lambda: redteam_grant_bypasses(tmp_path))
+    check("red-team: ledger tamper detection", lambda: redteam_ledger_tamper(tmp_path))
+    check("red-team: inject target injection shapes", redteam_inject_targets)
+    check("red-team: redaction limitations documented", lambda: redteam_redaction_limits(tmp_path))
+    check("red-team: API token/CORS/loopback/constant-time",
+          lambda: redteam_api_security(tmp_path))
+    check("red-team: brain endpoint guard + doctor hint + no keys",
+          lambda: redteam_brain_endpoints(tmp_path))
+    check("persona honorific plumbing (default/override/invalid)",
+          lambda: persona_honorific(tmp_path))
 
     check("BrainChain failover", chain_failover)
     check("BrainChain non-transient raises", chain_non_transient_raises)

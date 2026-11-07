@@ -84,6 +84,21 @@ If `jarvis access verify` reports TAMPERED, the ledger was edited outside
 the product — restore it from a backup or delete `access-log.jsonl` (the
 chain marks prior entries).
 
+**How tamper detection works:** each entry chains the SHA-256 of the
+previous one, and a checkpoint file (`access-log.meta.json`, entry count +
+head hash, written after every append) catches edits that leave a
+consistent prefix — including deleting the newest entries. Ledgers created
+before the checkpoint existed verify by chain alone until the next append
+writes the checkpoint.
+
+**Honest threat model:** the machine owner can always edit their own
+files. Replaying an old grant file, forging an expiry, or rewriting the
+state file with the correct device fingerprint WILL activate access — the
+protocol defends against automation, accidents, and persistence, not
+against the person sitting at the machine. Concurrent grants race
+(last writer wins); no environment variable or API endpoint can create a
+grant — only typing the confirmation phrase at the CLI.
+
 ## Code signing (status: unsigned builds)
 
 Current artifacts are **not code-signed** — Windows SmartScreen may show
@@ -103,12 +118,12 @@ content blocks. Tested with mocked HTTP.
 
 ## Eval baseline
 
-`jarvis eval run` executes 25 behavior scenarios offline (scripted
+`jarvis eval run` executes 31 behavior scenarios offline (scripted
 fixtures against the real agent machinery) — tool calling, gate
 enforcement, destructive-action confirmations, memory, prompt-injection
-plumbing, persona. Two scenarios are recorded as `known_failure` with
-reasons; everything else must pass. If a scenario regresses after an
-update, `jarvis eval compare <old> <new>` shows exactly what changed.
+plumbing, persona, routing. Every scenario must pass; if one regresses
+after an update, `jarvis eval compare <old> <new>` shows exactly what
+changed.
 
 ## Performance budget
 
@@ -121,6 +136,38 @@ change:
 | First token (local 7B brain, e.g. Ollama `qwen2.5:7b`) | < 2 s |
 | Dashboard load | < 1 s |
 | Eval run (`jarvis eval run`, offline) | < 30 s |
+
+## Cloud redaction — known limitations (read this)
+
+Before any cloud call, request text goes through a redaction gate that
+scrubs Windows/Unix home paths, email addresses, key-shaped strings
+(`sk-…`, `ghp-…`, `xoxb-…`, `AIza…`, `-----BEGIN … PRIVATE KEY-----`) and
+`UMBRA-…` license keys. On top of that, anything the router classifies as
+sensitive is pinned to local-only models. The redaction gate is a
+best-effort scrubber, **not** a data-loss-prevention engine. It does NOT
+catch:
+
+| Shape | Example | Why it slips through |
+|---|---|---|
+| Encoded secrets | `c2VjcmV0RGF0YQ==` (base64) | The pattern set matches literal key shapes; encoded blobs carry no recognizable shape. |
+| Spaced-out tokens | `s k - a b c` | Whitespace breaks the contiguous key pattern. |
+| Unicode escapes | `\u0041\u0049…` | The escape sequence is not the literal text the patterns match. |
+| Split across lines | `sk-abc` / newline / `12345678` | Patterns run per line; a key broken across lines never matches whole. |
+
+Practical rule: do not paste secrets into a cloud-routed conversation at
+all — if you must handle credentials, keep the request local (the router
+pins sensitive requests to local models, and you can check with
+`jarvis brain route --explain "<text>"`).
+
+## Brain endpoints — allowed addresses
+
+`validate_brain` and `jarvis doctor` refuse a configured brain endpoint
+that points at private/reserved infrastructure (for example
+`http://169.254.169.254/v1`, the cloud-metadata address, or `10.x`/`192.168.x`
+literal IPs). Allowed endpoints: public `https://` domains, `localhost` /
+`127.0.0.1` (local brains), and local-network *names* like `box.lan`. If
+your local model server sits on a raw LAN IP, reach it via a local
+port-forward or the machine's `.local`/`.lan` name instead.
 
 ## Health disclaimer
 

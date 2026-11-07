@@ -23,10 +23,9 @@
       {"reply": "At your service, Captain."}
     ],
     "checks": [
-      {"type": "system_prompt_contains", "text": "Captain"}
-    ],
-    "known_failure": true,
-    "known_failure_reason": "the personality honorific does not reach the system prompt yet (plumbing deferred in Mark XXVIII)"
+      {"type": "system_prompt_contains", "text": "Captain"},
+      {"type": "reply_contains", "text": "Captain"}
+    ]
   },
   {
     "id": "persona-003",

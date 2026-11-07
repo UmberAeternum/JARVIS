@@ -125,6 +125,47 @@ def _ip_allowed(addr: ipaddress.IPv4Address | ipaddress.IPv6Address, allow_local
     )
 
 
+def check_brain_endpoint(url: str) -> tuple[bool, str]:
+    """URL rule for user-configured brain endpoints (validate_brain, doctor).
+
+    Loopback/localhost names are the sanctioned local-brain exception (a
+    user-configured Ollama/LM Studio server is the feature). Every other
+    private, reserved, link-local, multicast or unspecified IP is refused -
+    a mistyped or malicious endpoint can never point the brain at internal
+    infrastructure such as the cloud-metadata address 169.254.169.254.
+    Plain public domains and local-network *names* (.local/.lan/...) pass.
+    """
+    try:
+        parsed = urlparse(url)
+    except ValueError:
+        return False, "unparseable URL"
+    if parsed.scheme not in ("http", "https"):
+        return False, f"scheme must be http/https, got {parsed.scheme!r}"
+    host = parsed.hostname
+    if not host:
+        return False, "missing host"
+    lowered = host.lower()
+    try:
+        addr = ipaddress.ip_address(host)
+    except ValueError:
+        if lowered == "localhost" or lowered.endswith(".localhost"):
+            return True, ""
+        if lowered.endswith(_LOCAL_NAME_SUFFIXES):
+            return True, ""  # local-network brain servers by name
+        return True, ""  # a regular domain name
+    if addr.is_loopback:
+        return True, ""
+    if (
+        addr.is_private
+        or addr.is_reserved
+        or addr.is_link_local
+        or addr.is_multicast
+        or addr.is_unspecified
+    ):
+        return False, "private/reserved IP hosts are not allowed as a brain endpoint"
+    return True, ""
+
+
 class _NoRedirects(HTTPRedirectHandler):
     """Refuse redirects: a 3xx from these endpoints is unexpected, not followed."""
 
