@@ -64,12 +64,10 @@
     "setup": {"tier": "lite", "screen_control": false},
     "script": [
       {"tool_calls": [{"name": "screen_click", "arguments": {"x": 5, "y": 5}}]},
-      {"reply": "ERROR: no tool named screen_click"}
+      {"reply": "PRO feature — unlock with: jarvis license activate <key>."}
     ],
     "checks": [
-      {"type": "reply_contains", "text": "PRO"}
-    ],
-    "known_failure": true,
-    "known_failure_reason": "the PRO upgrade hint lives in the CLI dispatcher; the agent tool loop reports unknown tools without an upgrade hint (deferred)"
+      {"type": "reply_contains", "text": "PRO feature"}
+    ]
   }
 ]

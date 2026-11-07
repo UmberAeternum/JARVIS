@@ -33,6 +33,22 @@ MAX_READ_CHARS = 20_000
 MAX_CLIPBOARD_CHARS = 4_000
 MAX_FILE_BYTES = 5_000_000
 
+# Tool names that exist only in the PRO build. When the agent loop is asked to
+# call one of these and it is absent from the registry (LITE tier), surface the
+# upgrade hint instead of a bare "unknown tool" error. Safe: only fires for
+# names that are genuinely not registered, and the message is informational.
+PRO_TOOL_NAMES = frozenset(
+    {
+        "screen_click",
+        "screen_type",
+        "screen_press",
+        "screen_scroll",
+        "watch_set",
+        "watch_list",
+        "watch_remove",
+    }
+)
+
 
 class ToolRegistry:
     def __init__(
@@ -75,6 +91,8 @@ class ToolRegistry:
         """Run one tool call and return its result as a string for the model."""
         handler = self._handlers.get(name)
         if handler is None:
+            if name in PRO_TOOL_NAMES:
+                return "PRO feature — unlock with: jarvis license activate <key>."
             return f"ERROR: unknown tool {name}"
         try:
             args = json.loads(arguments_json) if arguments_json.strip() else {}

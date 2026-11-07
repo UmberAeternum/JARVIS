@@ -8,9 +8,10 @@ serialized into a payload, and never included in an error message.
 
 The transport is injectable so tests can mock HTTP without touching the
 network: transport(method, host, path, body_bytes|None, headers) ->
-(status:int, bytes). Capability flags (tools/vision) are decided by the
-model manifest, exactly like the other adapters - the adapter never
-guesses.
+(status:int, bytes). OpenAI-format image attachments (see
+vision.build_vision_message) are converted to Anthropic image content
+blocks, so the adapter reports vision capability itself; tool support is
+still the model manifest's business.
 """
 
 from __future__ import annotations
@@ -25,6 +26,33 @@ from .base import Provider
 DEFAULT_BASE_URL = "https://api.anthropic.com"
 DEFAULT_MODEL = "claude-sonnet-5-5"
 API_VERSION = "2023-06-01"
+
+# Media types the Messages API accepts for base64 image sources.
+IMAGE_MEDIA_TYPES = ("image/jpeg", "image/png", "image/gif", "image/webp")
+
+
+def _image_block_from_url(url: str) -> dict | None:
+    """OpenAI vision part -> Anthropic image block (None when not convertible).
+
+    UMBRA's OpenAI-format image attachments look like
+    ``data:image/jpeg;base64,<payload>`` (see vision.build_vision_message).
+    Those become a base64 source block. Remote http(s) URLs become a url
+    source block, which the Messages API also accepts. Anything else is not
+    convertible; the caller falls back to a text note.
+    """
+    if url.startswith("data:"):
+        header, _, payload = url.partition(",")
+        media_type = header[5:].split(";", 1)[0].strip().lower()
+        if media_type == "image/jpg":  # common nonstandard alias
+            media_type = "image/jpeg"
+        if media_type not in IMAGE_MEDIA_TYPES or not payload:
+            return None
+        return {"type": "image",
+                "source": {"type": "base64", "media_type": media_type,
+                           "data": payload}}
+    if url.startswith(("http://", "https://")):
+        return {"type": "image", "source": {"type": "url", "url": url}}
+    return None
 
 
 def _default_transport(method: str, host: str, path: str, body: bytes | None,
@@ -139,6 +167,27 @@ class AnthropicProvider(Provider):
                 blocks.extend(self._tool_use_blocks(msg.get("tool_calls")))
                 out.append({"role": "assistant", "content": blocks})
                 continue
+            if isinstance(content, list):
+                # OpenAI multimodal format: text and image_url parts.
+                blocks: list[dict] = []
+                for part in content:
+                    if isinstance(part, dict) and part.get("type") == "image_url":
+                        url = str((part.get("image_url") or {}).get("url", ""))
+                        block = _image_block_from_url(url)
+                        if block is not None:
+                            blocks.append(block)
+                        else:
+                            blocks.append({"type": "text",
+                                           "text": "[image attachment omitted: "
+                                                   "unsupported format]"})
+                        continue
+                    text = part.get("text", "") if isinstance(part, dict) else part
+                    if str(text):
+                        blocks.append({"type": "text", "text": str(text)})
+                if blocks:
+                    out.append({"role": "assistant" if role == "assistant" else "user",
+                                "content": blocks})
+                continue
             out.append({"role": "assistant" if role == "assistant" else "user",
                         "content": str(content or "")})
         payload: dict = {
@@ -175,7 +224,7 @@ class AnthropicProvider(Provider):
         return []
 
     def vision(self) -> bool:
-        return False  # decided by the manifest, not the adapter
+        return True  # OpenAI-format image attachments are converted to image blocks
 
     def embed(self, text: str) -> list[float] | None:
         return None  # the Messages API has no embeddings endpoint

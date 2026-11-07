@@ -279,6 +279,37 @@ def brain_v0_providers_gateway(tmp: Path) -> None:
         result = run_provider_contract(provider)
         expect(result["chat_ok"] and not result["violations"],
                f"anthropic contract: {result}")
+
+        # vision: an OpenAI-format image attachment (data URI) converts to
+        # the Anthropic image content block over the mocked transport.
+        vision_captured: dict = {}
+
+        def vision_transport(method, host, path, body, headers):
+            vision_captured.update({"body": body})
+            return 200, json.dumps(
+                {"content": [{"type": "text", "text": "i see it"}]}).encode()
+
+        vision_provider = AnthropicProvider(transport=vision_transport)
+        expect(vision_provider.vision() is True, "anthropic vision flag")
+        vision_reply = vision_provider.chat([{
+            "role": "user",
+            "content": [
+                {"type": "text", "text": "what is on screen?"},
+                {"type": "image_url", "image_url": {
+                    "url": "data:image/jpeg;base64,QUJD"}},
+            ],
+        }])
+        expect(vision_reply["reply"] == "i see it", f"vision reply: {vision_reply}")
+        vbody = json.loads(vision_captured["body"].decode())
+        vcontent = vbody["messages"][0]["content"]
+        expect(isinstance(vcontent, list) and len(vcontent) == 2
+               and vcontent[0] == {"type": "text", "text": "what is on screen?"},
+               f"vision text part mapping: {vcontent}")
+        expect(vcontent[1] == {"type": "image",
+                               "source": {"type": "base64",
+                                          "media_type": "image/jpeg",
+                                          "data": "QUJD"}},
+               f"vision image block mapping: {vcontent[1]}")
     finally:
         if saved_key is None:
             os.environ.pop("ANTHROPIC_API_KEY", None)

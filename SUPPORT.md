@@ -92,6 +92,15 @@ a warning the first time you run `UMBRA.exe`. Verify downloads with
 pipeline gates it behind `--sign` with `UMBRA_SIGN_CERT` so signed builds
 replace unsigned ones without changing the workflow.
 
+## Anthropic brain
+
+The Anthropic adapter talks to `api.anthropic.com/v1/messages` with the
+stdlib HTTP client (no SDK) and reads `ANTHROPIC_API_KEY` per request — the
+key travels in the `x-api-key` header only and is never logged. Model IDs
+are manifest-driven (`anthropic/claude-sonnet-5-5`). Vision support: the
+Anthropic adapter converts OpenAI-format image attachments to Anthropic
+content blocks. Tested with mocked HTTP.
+
 ## Eval baseline
 
 `jarvis eval run` executes 25 behavior scenarios offline (scripted
