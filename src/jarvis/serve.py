@@ -57,6 +57,8 @@ class BridgeState:
             allow_screen_control=cfg.vision.screen_control,
         )
         self.registry = registry  # public surface: the agent's tool registry
+        from . import hud as hud_module
+
         chain = make_brain_chain(cfg, on_status=self.push_status)
         self.agent = Agent(
             chain,
@@ -64,6 +66,7 @@ class BridgeState:
             on_status=self.push_status,
             max_tool_iterations=cfg.max_tool_iterations,
             max_tokens_per_turn=cfg.max_tokens_per_turn,
+            should_stop=hud_module.should_stop,
         )
         self.push_event("status", {"text": "bridge online"})
 

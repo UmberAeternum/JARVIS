@@ -25,12 +25,17 @@ class Agent:
         on_status: Callable[[str], None] | None = None,
         max_tool_iterations: int = 8,
         max_tokens_per_turn: int = 100_000,
+        should_stop: Callable[[], bool] | None = None,
     ):
         self.chain = chain
         self.registry = registry
         self.on_status = on_status or (lambda status: None)
         self.max_tool_iterations = max(1, int(max_tool_iterations))
         self.max_tokens_per_turn = max(1000, int(max_tokens_per_turn))
+        # The kill switch probe (phase 11): checked between tool iterations.
+        # A streaming model call cannot be interrupted mid-generation - the
+        # halt lands between tool calls, which is where all side effects are.
+        self.should_stop = should_stop or (lambda: False)
         # system_prompt.build() loads the personality-pack honorific (default
         # "Sir") at construction time, so every agent surface (CLI, API,
         # overlay, dashboard, evals) speaks the user's chosen form of address.
@@ -46,6 +51,12 @@ class Agent:
         self.messages.append({"role": "user", "content": user_text})
         tokens_used = 0
         for _ in range(self.max_tool_iterations):
+            if self.should_stop():
+                self.on_status("kill switch engaged")
+                return (
+                    "KILL SWITCH engaged - halting all actions immediately. "
+                    "Nothing more runs this turn (clear with: jarvis stop --clear)."
+                )
             if on_text_delta is not None:
                 resp = self.chain.create_chat_stream(
                     messages=self._trimmed(),
@@ -81,6 +92,12 @@ class Agent:
                 }
             )
             for call in tool_calls:
+                if self.should_stop():
+                    self.on_status("kill switch engaged")
+                    return (
+                        "KILL SWITCH engaged - halting all actions immediately. "
+                        "Nothing more runs this turn (clear with: jarvis stop --clear)."
+                    )
                 self.on_status(f"tool: {call.function.name}")
                 result = self.registry.dispatch(call.function.name, call.function.arguments)
                 self.messages.append(

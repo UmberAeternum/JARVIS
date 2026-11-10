@@ -48,6 +48,7 @@ SETTABLE: tuple[str, ...] = (
     "hud.sound",
     "hud.typed",
     "hud.boot",
+    "hud.reduced_motion",
     "router.max_cost_per_request",
     "router.daily_budget",
     "max_tool_iterations",

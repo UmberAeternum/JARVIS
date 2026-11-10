@@ -82,6 +82,8 @@ Gated tools are auto-denied over the API — approvals live in the dashboard and
 |---|---|
 | `umbra` / `python -m jarvis` | The assistant — chat with all tools, confirmations, streaming |
 | `jarvis dashboard` | Local web mission control (full agent, streaming, SPEAK, HUD, resume) |
+| `jarvis hud serve` | The Orb HUD: state orb, status ring, live action log, devices, BRAIN/BODY/CHAIN panels - display only, token-gated |
+| `jarvis stop` | The kill switch: halts all wired actions at their next check (`jarvis stop --clear` rearms) |
 | `jarvis serve` / `jarvis serve --api` | PRO: Bridge over your LAN · LITE: local JSON API for other apps |
 | `jarvis overlay` | Always-on-top companion window (`--attach`, `--clickthrough`) |
 | `jarvis plugin scaffold vscode\|browser` | App-injection starters |

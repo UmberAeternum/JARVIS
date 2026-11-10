@@ -78,6 +78,7 @@ class ApiState:
         from . import licensing
         from .agent import Agent
         from .brain import make_brain_chain
+        from . import hud as hud_module
         from .tools import default_registry
 
         self.cfg = cfg
@@ -99,6 +100,7 @@ class ApiState:
             self.registry,
             max_tool_iterations=cfg.max_tool_iterations,
             max_tokens_per_turn=cfg.max_tokens_per_turn,
+            should_stop=hud_module.should_stop,
         )
 
     @staticmethod

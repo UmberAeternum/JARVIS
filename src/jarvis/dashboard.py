@@ -60,6 +60,7 @@ class DashboardState:
         )
         from .agent import Agent
         from .brain import make_brain_chain
+        from . import hud as hud_module
 
         chain = make_brain_chain(cfg, on_status=self.push_status)
         self.agent = Agent(
@@ -68,6 +69,7 @@ class DashboardState:
             on_status=self.push_status,
             max_tool_iterations=cfg.max_tool_iterations,
             max_tokens_per_turn=cfg.max_tokens_per_turn,
+            should_stop=hud_module.should_stop,
         )
         self.push_event("status", {"text": "dashboard online"})
 
@@ -93,6 +95,10 @@ class DashboardState:
             return [event for event in self.events if event["id"] > since]
 
     def push_status(self, status: str) -> None:
+        # Phase 11: the Orb HUD mirrors the dashboard's live status stream.
+        from . import hud as hud_module
+
+        hud_module.observe_status(status)
         self.push_event("status", {"text": status})
 
     # ------------------------------------------------------------------ gate
@@ -140,6 +146,9 @@ class DashboardState:
 
             def worker() -> None:
                 reply = None
+                from . import hud as hud_module
+
+                hud_module.set_state("thinking")
                 try:
                     # Mark XXIII - the living reply: stream progress to the page
                     buffer = {"text": ""}
@@ -166,6 +175,7 @@ class DashboardState:
                     # must not wait behind post-turn logging housekeeping
                     self.turn_running = False
                     self.turn_lock.release()
+                    hud_module.set_state("idle")
                 self._log_turn(text, reply)
 
             threading.Thread(target=worker, daemon=True).start()

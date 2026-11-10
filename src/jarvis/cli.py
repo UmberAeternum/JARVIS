@@ -59,6 +59,8 @@ def _rebuild(cfg: config.Config, console: Console, registry: tools.ToolRegistry)
             if live is not None:
                 live.start()
 
+    from . import hud as hud_module
+
     chain = brain.make_brain_chain(cfg, on_status=on_status)
     agent = Agent(
         chain,
@@ -66,6 +68,7 @@ def _rebuild(cfg: config.Config, console: Console, registry: tools.ToolRegistry)
         on_status=on_status,
         max_tool_iterations=cfg.max_tool_iterations,
         max_tokens_per_turn=cfg.max_tokens_per_turn,
+        should_stop=hud_module.should_stop,
     )
     return agent, status_box
 
@@ -509,7 +512,8 @@ def _dispatch(argv: list[str] | None = None) -> int:
             "  personality show | set - honorific, verbosity, humor, proactivity\n"
             "  access      grant --full | grant --tiers observe,assist,act,install | status | verify | log | revoke --all (EDITH protocol)\n"
             "  voice       show | set <default|jarvis> - TTS voice profile\n"
-            "  hud         show | theme <hologram|minimal> - dashboard HUD look\n"
+            "  hud         show | theme <minimal|hud|scanline> | serve | token rotate - the Orb HUD\n"
+            "  stop        the kill switch: halt all running actions (stop --clear to rearm)\n"
             "  intro       the 10-second boot sequence (--no-audio to skip speech)\n"
             "  api         token rotate | token show - the local API credential\n"
             "  dashboard   the Mission Control: local web dashboard\n"
@@ -1060,24 +1064,47 @@ def _dispatch(argv: list[str] | None = None) -> int:
             return 0
         console.print("usage: jarvis voice show | set <default|jarvis>")
         return 1
+    if argv and argv[0] == "stop":
+        # Phase 11 - the global kill switch (HIGH-CONSEQUENCE rules).
+        from . import hud as hud_module
+
+        if "--clear" in argv[1:]:
+            hud_module.clear_stop()
+            console.print("[green]Kill switch rearmed.[/] Actions may run again.")
+            return 0
+        hud_module.request_stop("jarvis stop")
+        console.print("[red]KILL SWITCH ENGAGED.[/] All wired actions halt at their next check.")
+        console.print("Rearm with: [bold]jarvis stop --clear[/]")
+        return 0
     if argv and argv[0] == "hud":
         sub = argv[1] if len(argv) > 1 else "show"
         current = config.Config.load() or config.Config()
         if sub == "show":
             console.print(
                 f"theme: {current.hud.theme} · sound: {current.hud.sound} · "
-                f"typed: {current.hud.typed} · boot: {current.hud.boot}"
+                f"typed: {current.hud.typed} · boot: {current.hud.boot} · "
+                f"reduced_motion: {current.hud.reduced_motion}"
             )
             return 0
         if sub == "theme":
-            if len(argv) < 3 or argv[2] not in ("hologram", "minimal"):
-                console.print("usage: jarvis hud theme <hologram|minimal>")
+            if len(argv) < 3 or argv[2] not in ("minimal", "hud", "scanline", "hologram"):
+                console.print("usage: jarvis hud theme <minimal|hud|scanline> (hologram = legacy alias of hud)")
                 return 1
             current.hud.theme = argv[2]
             current.save()
             console.print(f"[green]HUD theme:[/] {current.hud.theme}")
             return 0
-        console.print("usage: jarvis hud show | theme <hologram|minimal>")
+        if sub == "serve":
+            from .hud import run_hud
+
+            return run_hud(console)
+        if sub == "token" and len(argv) > 2 and argv[2] == "rotate":
+            from .hud import rotate_token
+
+            rotate_token()
+            console.print("[green]HUD token rotated.[/] Reopen the HUD with the new URL.")
+            return 0
+        console.print("usage: jarvis hud show | theme <minimal|hud|scanline> | serve | token rotate")
         return 1
     if argv and argv[0] == "intro":
         from .intro import run_intro

@@ -3144,6 +3144,167 @@ def hud_voice_intro(tmp: Path) -> None:
         config.config_dir = original
 
 
+def phase11_orb_hud(tmp: Path) -> None:
+    """Phase 11 - the Orb HUD: state colors, token auth, themes, reduced
+    motion, no external requests, the kill switch, and the agent halt."""
+    import http.client
+    import re as _re
+
+    from jarvis import hud as hud_module
+    from jarvis.hud import STATE_COLORS, HudState, state_color
+
+    original = config.config_dir
+    config.config_dir = lambda: tmp / "cfghud11"
+    try:
+        # state-to-color mapping: exactly the six states, unknown -> idle
+        expect(set(STATE_COLORS) == {"idle", "listening", "thinking", "working", "speaking", "alert"},
+               f"state set: {sorted(STATE_COLORS)}")
+        for state_name, hexcolor in STATE_COLORS.items():
+            expect(state_color(state_name) == hexcolor, f"color for {state_name}")
+        expect(state_color("bogus-state") == STATE_COLORS["idle"], "unknown state must fall back to idle")
+
+        # theme persistence + reduced motion (config round-trip)
+        cfg = config.Config(brains=config.BrainsConfig(primary=config.BrainConfig(type="local")))
+        cfg.hud.theme = "scanline"
+        cfg.hud.reduced_motion = True
+        cfg.save()
+        reloaded = config.Config.load()
+        expect(reloaded is not None, "config load failed")
+        expect(reloaded.hud.theme == "scanline", f"theme not persisted: {reloaded.hud.theme}")
+        expect(reloaded.hud.reduced_motion is True, "reduced_motion not persisted")
+
+        # kill switch primitives: latch, announce, probe, clear
+        hud_module.clear_stop()
+        expect(hud_module.should_stop() is False, "kill switch must start clear")
+        hud_module.request_stop("smoke test")
+        expect(hud_module.should_stop() is True, "request_stop must latch the flag")
+        expect(hud_module.HUD.state == "alert", "kill switch must raise alert state")
+        expect(any("KILL SWITCH" in action["text"] for action in hud_module.HUD.recent_actions(10)),
+               "kill switch must announce on the action log")
+        hud_module.clear_stop()
+        expect(hud_module.should_stop() is False, "clear_stop must rearm")
+    finally:
+        config.config_dir = original
+
+    # server round-trip: auth, state payload, events, stop endpoint, page
+    config.config_dir = lambda: tmp / "cfghud11b"
+    try:
+        token = hud_module.ensure_token()
+        expect(bool(token), "hud token must be creatable")
+        store = HudState()
+        store.set_state("working")
+        store.push_action("tool: open_app")
+        store.observe_device({"name": "phone", "tier": "assist", "last_seen": "now"})
+        cfg = config.Config()
+        cfg.hud.theme = "minimal"
+        server, port, thread = hud_module.start_server(store, cfg, preferred_port=0)
+        conn = http.client.HTTPConnection("127.0.0.1", port, timeout=10)
+        try:
+            conn.request("GET", "/api/state")
+            resp = conn.getresponse()
+            expect(resp.status == 403, f"state without token: {resp.status}")
+            resp.read()
+            conn.request("GET", "/api/state?t=wrong-token")
+            resp = conn.getresponse()
+            expect(resp.status == 403, f"state with wrong token: {resp.status}")
+            resp.read()
+
+            conn.request("GET", f"/api/state?t={token}")
+            resp = conn.getresponse()
+            payload = json.loads(resp.read().decode("utf-8"))
+            expect(resp.status == 200, f"state with token: {resp.status}")
+            expect(payload.get("state") == "working", f"state: {payload.get('state')}")
+            expect(payload.get("color") == STATE_COLORS["working"], f"color: {payload.get('color')}")
+            expect(payload.get("hud", {}).get("theme") == "minimal", f"theme: {payload.get('hud')}")
+            expect(payload.get("hud", {}).get("reduced_motion") is False, "reduced_motion default")
+            expect(bool(payload.get("honorific")), f"honorific: {payload.get('honorific')}")
+            expect("vitals" in payload and "tier" in payload and "grants" in payload,
+                   f"status ring fields: {sorted(payload)}")
+            expect(payload.get("brain", {}).get("provider") != "", f"brain panel: {payload.get('brain')}")
+            expect(any(a["text"] == "tool: open_app" for a in payload.get("actions", [])),
+                   f"actions: {payload.get('actions')}")
+            expect(payload.get("devices") == [{"name": "phone", "tier": "assist", "last_seen": "now"}],
+                   f"devices: {payload.get('devices')}")
+            expect("chain" in payload and "captions" in payload, "avatar panel fields")
+
+            # live action stream: long-poll returns new events only
+            store.push_action("second action")
+            conn.request("GET", f"/api/events?t={token}&since=1")
+            resp = conn.getresponse()
+            events = json.loads(resp.read().decode("utf-8"))
+            expect(resp.status == 200, f"events: {resp.status}")
+            expect(any(ev["text"] == "second action" for ev in events.get("events", [])),
+                   f"events tail: {events}")
+            # malformed since must not kill the handler
+            conn.request("GET", f"/api/events?t={token}&since=abc")
+            resp = conn.getresponse()
+            expect(resp.status == 200, f"malformed since: {resp.status}")
+            resp.read()
+
+            # the one POST this surface accepts: the kill switch, token-gated
+            conn.request("POST", "/api/stop", body=b"{}", headers={"Content-Type": "application/json"})
+            resp = conn.getresponse()
+            expect(resp.status == 403, f"stop without token: {resp.status}")
+            resp.read()
+            conn.request("POST", f"/api/stop?t={token}", body=b"{}", headers={"Content-Type": "application/json"})
+            resp = conn.getresponse()
+            stopped = json.loads(resp.read().decode("utf-8"))
+            expect(resp.status == 200 and stopped.get("stopped") is True, f"stop: {stopped}")
+            expect(hud_module.should_stop() is True, "HUD stop endpoint must latch the kill flag")
+            hud_module.clear_stop()
+
+            # the page: a11y markers, themes, boot line, and no external requests
+            conn.request("GET", "/")
+            resp = conn.getresponse()
+            page = resp.read().decode("utf-8")
+            expect(resp.status == 200 and "text/html" in resp.getheader("Content-Type", ""),
+                   f"page: {resp.status}")
+            expect("prefers-reduced-motion" in page, "reduced-motion media query missing")
+            expect("prefers-contrast" in page, "high-contrast support missing")
+            expect("aria-label" in page and "aria-live" in page, "a11y labels missing")
+            expect("<button" in page, "keyboard-reachable controls missing")
+            expect("theme-minimal" in page and "theme-scanline" in page, "themes missing")
+            expect("System online" in page, "boot sequence line missing")
+            expect("STATE_COLORS" in page and "#14b8a6" in page, "state-color map missing on page")
+            external = _re.findall(r"""(?:src|href)=["']https?://""", page) + \
+                _re.findall(r"""fetch\(\s*["']https?://""", page) + \
+                _re.findall(r"""url\(\s*["']?https?://""", page)
+            expect(not external, f"external requests found: {external[:3]}")
+        finally:
+            conn.close()
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=5)
+    finally:
+        config.config_dir = original
+
+    # the agent honors the kill switch between tool calls
+    from jarvis.agent import Agent
+    from jarvis.evals import ScriptedModel
+    from jarvis.tools import default_registry
+
+    config.config_dir = lambda: tmp / "cfghud11c"
+    try:
+        hud_module.clear_stop()
+        model = ScriptedModel([
+            {"tool_calls": [{"name": "memory_search", "arguments": {}}]},
+            {"reply": "never reached"},
+        ])
+        registry = default_registry(confirm=lambda description: False)
+        probes = {"n": 0}
+
+        def stop_after_first() -> bool:
+            probes["n"] += 1
+            return probes["n"] > 1  # stop right after the first tool call
+
+        agent = Agent(model, registry, should_stop=stop_after_first)
+        reply = agent.run_turn("do the thing")
+        expect("KILL SWITCH" in reply, f"agent must halt on the kill switch: {reply}")
+        hud_module.clear_stop()
+    finally:
+        config.config_dir = original
+
+
 def edith_protocol(tmp: Path) -> None:
     """Mark XXXI - the EDITH protocol: grants, ledger, refusal, no self-prop."""
     import io
@@ -3632,16 +3793,16 @@ def eval_baseline(tmp: Path) -> None:
 
     scenarios_dir = Path(__file__).resolve().parent / "evals" / "scenarios"
     scenarios = load_scenarios(scenarios_dir)
-    expect(len(scenarios) == 31, f"expected 31 scenarios, got {len(scenarios)}")
+    expect(len(scenarios) == 33, f"expected 33 scenarios, got {len(scenarios)}")
     categories = {s.get("category") for s in scenarios}
     expect(categories == {"tool_calling", "gate_enforcement", "destructive",
-                          "memory", "prompt_injection", "persona", "routing"},
+                          "memory", "prompt_injection", "persona", "routing", "hud"},
            f"category coverage: {categories}")
 
     # offline run: every scenario executes in an isolated config dir
     with tempfile.TemporaryDirectory() as td:
         results = run_scenarios(scenarios, Path(td))
-    expect(results["total"] == 31, f"total: {results['total']}")
+    expect(results["total"] == 33, f"total: {results['total']}")
 
     # known failures are recorded honestly with reasons
     known = [r for r in results["results"] if not r["passed"] and r["known_failure"]]
@@ -3679,7 +3840,7 @@ def eval_baseline(tmp: Path) -> None:
 
     write_baseline(baseline_path, results)
     loaded = json.loads(baseline_path.read_text(encoding="utf-8"))
-    expect(len(loaded.get("results", [])) == 31, "baseline file incomplete")
+    expect(len(loaded.get("results", [])) == 33, "baseline file incomplete")
     report2 = compare_results(loaded, loaded)
     expect(not report2["regressions"], "self-compare must have no regressions")
 
@@ -4594,6 +4755,8 @@ def main() -> int:
     check("inject scan + plans + bundle", lambda: inject_scan_plan_bundle(tmp_path))
     check("presence: wake + ambient + personality", lambda: presence_wake_ambient_personality(tmp_path))
     check("hud + voice profile + intro", lambda: hud_voice_intro(tmp_path))
+    check("phase 11: orb HUD (states, auth, themes, kill switch, a11y, no external)",
+          lambda: phase11_orb_hud(tmp_path))
     check("EDITH protocol", lambda: edith_protocol(tmp_path))
     check("policy spine: authorize", lambda: spine_authorize(tmp_path))
     check("GA hardening", lambda: ga_hardening(tmp_path))

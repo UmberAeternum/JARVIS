@@ -78,5 +78,23 @@ Implemented in Phase 3. This section is the design of record.
 - Tests first: the failing control-test is written before the capability.
 - Independent verification at every gate: agent summaries are claims; run
   the suite and the gate commands yourself (or via a separate auditor).
+
+## Phases 11-20 run (spec of 2026-11-10, autonomous)
+
+Continues from v3.29.0. Gates per phase: smoke suite, `jarvis eval compare`
+(no regression), `jarvis access verify`, commit + tag `phase-N`.
+
+| Phase | Goal | Status |
+|---|---|---|
+| 11. Orb HUD, avatar, boot sequence | Token-gated display-only HUD (127.0.0.1:8776): particle orb with the six state colors, status ring, live action log, devices, captions, boot line with honorific, minimal/hud/scanline themes, reduced-motion/high-contrast/keyboard a11y. Global kill switch (`jarvis stop`, HUD KILL button, agent `should_stop` probe between tool calls). 1 new smoke check, 2 new eval scenarios (hud category) | **DONE** (96/96 smoke · 33/33 eval · no regressions · ledger OK) |
+| 12. Voice upgrade | streaming STT/TTS provider abstraction | open |
+| 13. Hand gestures | opt-in, local hand tracking; fist = kill switch; gestures can never confirm high-consequence actions | open |
+| 14. Browser/app control | action DSL through authorize(), MONEY stop-before-final-step | open |
+| 15. Messaging/email | draft-only, per-message confirmation | open |
+| 16. Website builder | original templates, clone-brand refusal, publish gate | open |
+| 17. Reel/video assistant | ffmpeg non-destructive pipeline | open |
+| 18. Phone companion + devices | PWA upgrade, device grants, scoped tokens | open |
+| 19. Productivity core | tasks/calendar/notes/automations under HIGH-CONSEQUENCE rules | open |
+| 20. Verify and release | red-team pass 2, fresh-clone CI, docs, release dry-run | open |
 - Red-team pass per phase: try to bypass the new controls via config, env
   var, API, and restart. Any success is a bug fixed in the same phase.

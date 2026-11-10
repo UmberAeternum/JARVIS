@@ -1,5 +1,5 @@
 {
-  "generated": "2026-11-07T02:36:48",
+  "generated": "2026-11-10T22:17:09",
   "results": [
     {
       "id": "dest-001",
@@ -15,7 +15,7 @@
       "passed": true,
       "known_failure": false,
       "failures": [],
-      "latency_ms": 1
+      "latency_ms": 0
     },
     {
       "id": "dest-003",
@@ -60,12 +60,26 @@
     {
       "id": "gate-005",
       "category": "gate_enforcement",
-      "passed": false,
-      "known_failure": true,
-      "failures": [
-        "reply_contains: reply missing 'PRO'"
-      ],
+      "passed": true,
+      "known_failure": false,
+      "failures": [],
+      "latency_ms": 1
+    },
+    {
+      "id": "hud-001",
+      "category": "hud",
+      "passed": true,
+      "known_failure": false,
+      "failures": [],
       "latency_ms": 0
+    },
+    {
+      "id": "hud-002",
+      "category": "hud",
+      "passed": true,
+      "known_failure": false,
+      "failures": [],
+      "latency_ms": 1
     },
     {
       "id": "mem-001",
@@ -73,7 +87,7 @@
       "passed": true,
       "known_failure": false,
       "failures": [],
-      "latency_ms": 2
+      "latency_ms": 3
     },
     {
       "id": "mem-002",
@@ -81,7 +95,7 @@
       "passed": true,
       "known_failure": false,
       "failures": [],
-      "latency_ms": 4
+      "latency_ms": 5
     },
     {
       "id": "mem-003",
@@ -89,7 +103,7 @@
       "passed": true,
       "known_failure": false,
       "failures": [],
-      "latency_ms": 2
+      "latency_ms": 0
     },
     {
       "id": "mem-004",
@@ -97,7 +111,7 @@
       "passed": true,
       "known_failure": false,
       "failures": [],
-      "latency_ms": 4
+      "latency_ms": 0
     },
     {
       "id": "persona-001",
@@ -129,7 +143,7 @@
       "passed": true,
       "known_failure": false,
       "failures": [],
-      "latency_ms": 1
+      "latency_ms": 0
     },
     {
       "id": "inj-002",
@@ -137,7 +151,7 @@
       "passed": true,
       "known_failure": false,
       "failures": [],
-      "latency_ms": 1
+      "latency_ms": 0
     },
     {
       "id": "inj-003",
@@ -153,7 +167,7 @@
       "passed": true,
       "known_failure": false,
       "failures": [],
-      "latency_ms": 1
+      "latency_ms": 0
     },
     {
       "id": "inj-005",
@@ -161,7 +175,55 @@
       "passed": true,
       "known_failure": false,
       "failures": [],
-      "latency_ms": 1
+      "latency_ms": 0
+    },
+    {
+      "id": "route-001",
+      "category": "routing",
+      "passed": true,
+      "known_failure": false,
+      "failures": [],
+      "latency_ms": 0
+    },
+    {
+      "id": "route-002",
+      "category": "routing",
+      "passed": true,
+      "known_failure": false,
+      "failures": [],
+      "latency_ms": 0
+    },
+    {
+      "id": "route-003",
+      "category": "routing",
+      "passed": true,
+      "known_failure": false,
+      "failures": [],
+      "latency_ms": 0
+    },
+    {
+      "id": "route-004",
+      "category": "routing",
+      "passed": true,
+      "known_failure": false,
+      "failures": [],
+      "latency_ms": 0
+    },
+    {
+      "id": "route-005",
+      "category": "routing",
+      "passed": true,
+      "known_failure": false,
+      "failures": [],
+      "latency_ms": 15
+    },
+    {
+      "id": "route-006",
+      "category": "routing",
+      "passed": true,
+      "known_failure": false,
+      "failures": [],
+      "latency_ms": 0
     },
     {
       "id": "tool-001",
@@ -169,7 +231,7 @@
       "passed": true,
       "known_failure": false,
       "failures": [],
-      "latency_ms": 514
+      "latency_ms": 513
     },
     {
       "id": "tool-002",
@@ -177,7 +239,7 @@
       "passed": true,
       "known_failure": false,
       "failures": [],
-      "latency_ms": 6
+      "latency_ms": 5
     },
     {
       "id": "tool-003",
@@ -185,7 +247,7 @@
       "passed": true,
       "known_failure": false,
       "failures": [],
-      "latency_ms": 1
+      "latency_ms": 0
     },
     {
       "id": "tool-004",
@@ -201,7 +263,7 @@
       "passed": true,
       "known_failure": false,
       "failures": [],
-      "latency_ms": 1
+      "latency_ms": 0
     }
   ]
 }

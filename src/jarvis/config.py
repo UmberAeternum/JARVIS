@@ -157,10 +157,11 @@ class HudConfig:
     """Mark XXIX: dashboard HUD polish. Pure presentation; defaults are the
     hologram look with sound + typed responses on."""
 
-    theme: str = "hologram"      # hologram | minimal (CSS only, no projection)
+    theme: str = "hologram"      # hologram | minimal | hud | scanline (CSS only, no projection)
     sound: bool = True           # subtle sound cues (WebAudio, local)
     typed: bool = True           # typed-out response effect
     boot: bool = True            # boot sequence on dashboard load
+    reduced_motion: bool = False  # phase 11: freeze orb animation (a11y override)
 
 
 @dataclass
@@ -306,6 +307,7 @@ class Config:
                 "sound": self.hud.sound,
                 "typed": self.hud.typed,
                 "boot": self.hud.boot,
+                "reduced_motion": self.hud.reduced_motion,
             },
             "access": {
                 "window_hours": self.access.window_hours,
