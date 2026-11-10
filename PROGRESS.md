@@ -1,6 +1,6 @@
 # PROGRESS — Phases 11–20 autonomous run
 
-**Status: VERIFY FIRST green (2026-11-10, Python 3.12.10 + Git 2.56.0.4 installed). Phase 11 DONE (tag phase-11). Current: phase-12 next.**
+**Status: Phase 11 DONE (tag phase-11, pushed). Phase 12 DONE (tag phase-12). Current: phase-13 next.**
 
 ## Verify-first results (2026-11-10, final)
 
@@ -31,7 +31,9 @@ Toolchain: Python 3.12.10 (user scope, `%LOCALAPPDATA%\Programs\Python\Python312
 - phase-11 Orb HUD, avatar, boot sequence — **DONE** (gates green; commit + tag phase-11)
   - files: src/jarvis/hud.py (new), src/jarvis/hud_page.py (new), agent.py (+should_stop probe), api.py/serve.py/dashboard.py (+kill-switch wiring, dashboard→HUD status feed), config.py (+hud.reduced_motion), settings.py (+whitelist key), cli.py (hud serve | token rotate, jarvis stop, help), tests/test_smoke.py (+phase11_orb_hud, count 31→33 maintenance), tests/evals/scenarios/hud.json (new, 2 scenarios), tests/evals/baseline.json (regenerated with project writer), README.md, ROADMAP.md
   - gates: smoke 96/96 · eval 33/33 · compare no regressions · access verify OK
-- phase-12 Voice upgrade — not started
+- phase-12 Voice upgrade — **DONE** (gates green; commit + tag phase-12)
+  - files: src/jarvis/voice_stream.py (new), voice.py untouched, config.py (+6 voice provider keys), settings.py (+6 whitelist keys), cli.py (speak_reply at both speak sites, _wake_session --stream, _wake_stream_command), tests/test_smoke.py (+phase12_voice_upgrade, counts 33→34), tests/evals/scenarios/voice.json (new), tests/evals/baseline.json (regenerated), README.md, ROADMAP.md
+  - gates: smoke 97/97 · eval 34/34 · compare no regressions · access verify OK
 - phase-13 Hand gestures — not started
 - phase-14 Browser/app control engine — not started
 - phase-15 Messaging/email assistant — not started
@@ -54,3 +56,4 @@ Toolchain: Python 3.12.10 (user scope, `%LOCALAPPDATA%\Programs\Python\Python312
 ## Mocked / unverified-on-hardware items
 
 - Phase 11: audio-reactive orb (browser WebAudio) is client-side and opt-in; no automated test can hear it — verified by code review + the no-external-requests test only. Unverified on real hardware.
+- Phase 12: the microphone InputStream loop in `_wake_stream_command` (cli.py) and real Vosk/Whisper/SAPI behavior are hardware paths — the provider abstraction, wake loop, gates, captions, and latency budget are tested with scripted providers and a fake clock. Unverified on real hardware until the user runs `jarvis wake --stream` with a mic.

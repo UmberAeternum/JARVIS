@@ -93,7 +93,7 @@ Gated tools are auto-denied over the API — approvals live in the dashboard and
 | `jarvis settings show / set / reset` | Configuration (secrets always masked) |
 | `jarvis profile list / create / use / delete` | Isolated identities |
 | `jarvis export` / `jarvis import` | Move data between machines or profiles |
-| `jarvis wake` | Hands-free wake-word mode |
+| `jarvis wake` | Hands-free wake-word mode (`--stream`: live captions on the HUD, kill-switch aware, streaming provider layer) |
 | `jarvis personality show / set` | Honorific, verbosity, humor, proactivity |
 | `jarvis voice show / set` / `jarvis hud show / theme` | TTS profile · HUD theme |
 | `jarvis intro` | The 10-second boot sequence (`--no-audio` works) |

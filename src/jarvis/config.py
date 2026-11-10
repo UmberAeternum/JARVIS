@@ -150,6 +150,14 @@ class VoiceConfig:
     mic_device: int | None = None  # sounddevice input device index (None = default)
     wake_phrase: str = "Hey UMBRA"  # Mark XXVIII: hands-free wake phrase
     profile: str = ""            # Mark XXIX: "" | "jarvis" (British butler TTS)
+    # Phase 12 - the streaming provider layer. Local first; cloud is opt-in
+    # twice (provider=cloud AND cloud_*), stated in settings show / wizard.
+    stt_provider: str = "local"  # "local" | "cloud"
+    tts_provider: str = "local"  # "local" | "cloud"
+    cloud_stt: bool = False      # explicit audio-leaves-machine consent (STT)
+    cloud_tts: bool = False      # explicit text-leaves-machine consent (TTS)
+    cloud_stt_url: str = ""      # OpenAI-compatible endpoint; "" = brain base_url
+    cloud_tts_url: str = ""      # OpenAI-compatible endpoint; "" = brain base_url
 
 
 @dataclass
@@ -276,6 +284,12 @@ class Config:
                 "mic_device": self.voice.mic_device,
                 "wake_phrase": self.voice.wake_phrase,
                 "profile": self.voice.profile,
+                "stt_provider": self.voice.stt_provider,
+                "tts_provider": self.voice.tts_provider,
+                "cloud_stt": self.voice.cloud_stt,
+                "cloud_tts": self.voice.cloud_tts,
+                "cloud_stt_url": self.voice.cloud_stt_url,
+                "cloud_tts_url": self.voice.cloud_tts_url,
             },
             "vision": {
                 "enabled": self.vision.enabled,

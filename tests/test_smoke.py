@@ -3144,6 +3144,202 @@ def hud_voice_intro(tmp: Path) -> None:
         config.config_dir = original
 
 
+def phase12_voice_upgrade(tmp: Path) -> None:
+    """Phase 12 - streaming voice: provider gates, partials, the latency
+    budget (fake clock), HUD captions + listening indicator, wake loop,
+    cloud privacy gate. No hardware, no network."""
+    import struct as _struct
+
+    from jarvis import hud as hud_module
+    from jarvis import voice_stream as vs
+    from jarvis.voice_stream import (CloudCompatTTS, listen_stream, LocalTTS,
+                                     make_stt_stream, split_for_speech,
+                                     speak_reply, wake_stream_loop)
+
+    original = config.config_dir
+    config.config_dir = lambda: tmp / "cfghud12"
+    try:
+        # defaults: local first, cloud opt-in OFF, capture opt-in OFF
+        cfg = config.Config()
+        expect(cfg.voice.stt_provider == "local" and cfg.voice.tts_provider == "local",
+               "voice providers must default to local")
+        expect(cfg.voice.cloud_stt is False and cfg.voice.cloud_tts is False,
+               "cloud voice must default OFF")
+        expect(cfg.voice.enabled is False, "voice capture must default OFF")
+
+        # config round-trip with the new keys
+        cfg.voice.stt_provider = "cloud"
+        cfg.voice.cloud_stt = True
+        cfg.voice.cloud_stt_url = "https://api.example.com/v1"
+        cfg.save()
+        reloaded = config.Config.load()
+        expect(reloaded is not None and reloaded.voice.stt_provider == "cloud"
+               and reloaded.voice.cloud_stt is True, "voice provider keys not persisted")
+
+        # the cloud STT gate: opt-in twice + endpoint validation
+        cfg_no = config.Config()
+        cfg_no.voice.stt_provider = "cloud"  # cloud_stt stays False
+        provider, reason = make_stt_stream(cfg_no)
+        expect(provider is None and "opt-in" in reason, f"cloud opt-in gate: {reason}")
+        cfg_ok = config.Config()
+        cfg_ok.voice.stt_provider = "cloud"
+        cfg_ok.voice.cloud_stt = True
+        cfg_ok.voice.cloud_stt_url = "https://api.example.com/v1"
+        provider, reason = make_stt_stream(cfg_ok)
+        expect(provider is not None and provider.name == "cloud-compat",
+               f"cloud factory: {reason}")
+        cfg_bad = config.Config()
+        cfg_bad.voice.stt_provider = "cloud"
+        cfg_bad.voice.cloud_stt = True
+        cfg_bad.voice.cloud_stt_url = "https://169.254.169.254/v1"
+        provider, reason = make_stt_stream(cfg_bad)
+        expect(provider is None, f"metadata endpoint must be refused: {reason}")
+        cfg_local = config.Config()
+        provider, reason = make_stt_stream(cfg_local)
+        expect(provider is not None and provider.name == "local-vosk",
+               f"local default: {reason}")
+
+        # cloud TTS privacy gate: sensitive text never leaves as audio
+        cloud_tts = CloudCompatTTS("https://api.example.com/v1", "k")
+        ok, reason = cloud_tts.allowed("the key is at C:\\Users\\me\\secret.txt")
+        expect(not ok and "sensitive" in reason, f"TTS privacy gate: {reason}")
+        ok2, _ = cloud_tts.allowed("All systems nominal, Sir.")
+        expect(ok2, "ordinary text must pass the TTS gate")
+        ok3, reason3 = cloud_tts.allowed("fine text but bad endpoint")
+        # endpoint validation inside allowed()
+        cloud_bad = CloudCompatTTS("https://169.254.169.254/v1", "k")
+        ok4, reason4 = cloud_bad.allowed("All systems nominal, Sir.")
+        expect(not ok4, f"TTS endpoint gate: {reason4}")
+
+        # batch STT size cap (no network touched)
+        cfg_ok2 = config.Config()
+        cfg_ok2.voice.stt_provider = "cloud"
+        cfg_ok2.voice.cloud_stt = True
+        cfg_ok2.voice.cloud_stt_url = "https://api.example.com/v1"
+        cloud_stt, _ = make_stt_stream(cfg_ok2)
+        cloud_stt._buf = b"x" * vs.MAX_CLOUD_AUDIO_BYTES
+        expect(cloud_stt.accept(b"more") == "" and cloud_stt.last_error != "",
+               "cloud STT must stop at the size cap")
+
+        # speech chunking: sentence split, capped length
+        pieces = split_for_speech("One sentence. Two sentences! A question? " * 10)
+        expect(len(pieces) >= 3 and all(len(p) <= 240 for p in pieces), "chunker")
+        expect(len(pieces) <= 12, "chunker must cap the piece count")
+
+        # listen_stream with a scripted provider (no hardware)
+        class ScriptedSTT:
+            name = "scripted"
+
+            def __init__(self, partials, final):
+                self.partials = list(partials)
+                self._final = final
+
+            def accept(self, chunk):
+                return self.partials.pop(0) if self.partials else ""
+
+            def finalize(self):
+                return self._final
+
+        hud_module.clear_stop()
+        hud_module.HUD.set_state("idle")
+        hud_module.HUD.set_caption("")
+        states = []
+        partials_seen = []
+        provider = ScriptedSTT(["", "a", "a", "b", "", "c"], "final command, Sir")
+        final, report = listen_stream(
+            provider, [b"ch1", b"ch2", b"ch3", b"ch4", b"ch5", b"ch6"],
+            on_partial=partials_seen.append,
+            on_state_change=states.append,
+        )
+        expect(final == "final command, Sir", f"final: {final}")
+        expect(partials_seen == ["a", "b", "c"], f"distinct partials in order: {partials_seen}")
+        expect(states == ["listening", "idle"], f"listening indicator: {states}")
+        expect(hud_module.HUD.state == "idle", "HUD must return to idle after capture")
+        expect(report["within_budget"] is True, f"budget report: {report}")
+        expect(report["provider"] == "scripted", "report names the provider")
+
+        # latency budget with a fake clock (deterministic, no sleeps)
+        fake = {"t": 100.0}
+
+        def fake_monotonic():
+            fake["t"] += 0.9  # every measured gap becomes 0.9 s > 0.7 budget
+            return fake["t"]
+
+        real_monotonic = vs.time.monotonic
+        vs.time.monotonic = fake_monotonic
+        try:
+            slow = ScriptedSTT(["a", "b", "c"], "done")
+            _, slow_report = listen_stream(slow, [b"c1", b"c2", b"c3", b"c4"])
+            expect(slow_report["within_budget"] is False
+                   and slow_report["max_partial_gap_s"] > vs.PARTIAL_BUDGET_S,
+                   f"over-budget must be reported honestly: {slow_report}")
+        finally:
+            vs.time.monotonic = real_monotonic
+
+        # kill switch stops the capture mid-stream (wired like the agent is)
+        hud_module.request_stop("smoke")
+        stopped = ScriptedSTT(["a", "b", "c"], "should not finalize")
+        final2, report2 = listen_stream(stopped, [b"c1", b"c2", b"c3"],
+                                        on_state_change=states.append,
+                                        should_stop=hud_module.should_stop)
+        hud_module.clear_stop()
+        expect(final2 == "" and report2["stopped"] is True,
+               f"kill switch must stop capture: {final2} {report2}")
+
+        # wake loop: partials drive the wake matcher, prefix stripped, RMS gates
+        loud = _struct.pack("<4h", 5000, 5000, -5000, -5000) * 800
+        quiet = b"\x00" * 800
+        wake_chunks = [
+            (quiet, ""), (quiet, ""), (quiet, "umbra"),
+            (loud, "umbra what"), (loud, "umbra what time"),
+            (loud, "umbra what time is it"), (quiet, ""), (quiet, ""),
+        ]
+        class WakeSTT:
+            name = "wake-scripted"
+
+            def __init__(self, plan):
+                self.plan = list(plan)
+
+            def accept(self, chunk):
+                _audio, partial = self.plan.pop(0)
+                return partial
+
+            def finalize(self):
+                return "umbra what time is it"
+
+        wake_provider = WakeSTT(wake_chunks)
+        fake2 = {"t": 100.0}
+
+        def fake_clock():
+            fake2["t"] += 0.5
+            return fake2["t"]
+
+        real_monotonic = vs.time.monotonic
+        vs.time.monotonic = fake_clock
+        try:
+            command = wake_stream_loop(wake_provider, [pair[0] for pair in wake_chunks],
+                                       "Hey UMBRA")
+        finally:
+            vs.time.monotonic = real_monotonic
+        expect(command == "what time is it", f"wake loop command: {command!r}")
+
+        # no wake word -> empty command (text fallback path)
+        nowake = WakeSTT([(quiet, ""), (quiet, "just chatting")])
+        expect(wake_stream_loop(nowake, [quiet, quiet], "Hey UMBRA") == "",
+               "no wake word must yield no command")
+
+        # speak_reply respects tts_enabled=off (text fallback, no engine touched)
+        cfg_mute = config.Config()
+        cfg_mute.voice.tts_enabled = False
+        expect(speak_reply(cfg_mute, "hello") is False, "tts off must not speak")
+
+        # LocalTTS stays inert without a spoken call: construction must not init SAPI
+        inert = LocalTTS(on_error=lambda message: None)
+        expect(inert.name == "local-sapi", "local TTS provider present")
+    finally:
+        config.config_dir = original
+
+
 def phase11_orb_hud(tmp: Path) -> None:
     """Phase 11 - the Orb HUD: state colors, token auth, themes, reduced
     motion, no external requests, the kill switch, and the agent halt."""
@@ -3793,16 +3989,17 @@ def eval_baseline(tmp: Path) -> None:
 
     scenarios_dir = Path(__file__).resolve().parent / "evals" / "scenarios"
     scenarios = load_scenarios(scenarios_dir)
-    expect(len(scenarios) == 33, f"expected 33 scenarios, got {len(scenarios)}")
+    expect(len(scenarios) == 34, f"expected 34 scenarios, got {len(scenarios)}")
     categories = {s.get("category") for s in scenarios}
     expect(categories == {"tool_calling", "gate_enforcement", "destructive",
-                          "memory", "prompt_injection", "persona", "routing", "hud"},
+                          "memory", "prompt_injection", "persona", "routing", "hud",
+                          "voice"},
            f"category coverage: {categories}")
 
     # offline run: every scenario executes in an isolated config dir
     with tempfile.TemporaryDirectory() as td:
         results = run_scenarios(scenarios, Path(td))
-    expect(results["total"] == 33, f"total: {results['total']}")
+    expect(results["total"] == 34, f"total: {results['total']}")
 
     # known failures are recorded honestly with reasons
     known = [r for r in results["results"] if not r["passed"] and r["known_failure"]]
@@ -3840,7 +4037,7 @@ def eval_baseline(tmp: Path) -> None:
 
     write_baseline(baseline_path, results)
     loaded = json.loads(baseline_path.read_text(encoding="utf-8"))
-    expect(len(loaded.get("results", [])) == 33, "baseline file incomplete")
+    expect(len(loaded.get("results", [])) == 34, "baseline file incomplete")
     report2 = compare_results(loaded, loaded)
     expect(not report2["regressions"], "self-compare must have no regressions")
 
@@ -4757,6 +4954,8 @@ def main() -> int:
     check("hud + voice profile + intro", lambda: hud_voice_intro(tmp_path))
     check("phase 11: orb HUD (states, auth, themes, kill switch, a11y, no external)",
           lambda: phase11_orb_hud(tmp_path))
+    check("phase 12: streaming voice (gates, partials, budget, wake, captions)",
+          lambda: phase12_voice_upgrade(tmp_path))
     check("EDITH protocol", lambda: edith_protocol(tmp_path))
     check("policy spine: authorize", lambda: spine_authorize(tmp_path))
     check("GA hardening", lambda: ga_hardening(tmp_path))

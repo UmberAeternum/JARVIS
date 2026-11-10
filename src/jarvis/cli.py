@@ -361,13 +361,21 @@ def _chat_loop(
         console.print(Panel(Markdown(reply), title="J.A.R.V.I.S.", border_style="cyan"))
         if voice_active and voice is not None and cfg.voice.tts_enabled:
             try:
-                voice.speak(reply)
+                from .voice_stream import speak_reply
+
+                speak_reply(cfg, reply)
             except Exception as exc:
                 console.print(f"[dim](speech failed: {exc})[/]")
 
 
-def _wake_session(cfg: config.Config, console: Console) -> None:
-    """Hands-free loop: say 'Jarvis', speak a command, get a spoken answer."""
+def _wake_session(cfg: config.Config, console: Console, stream: bool = False) -> None:
+    """Hands-free loop: say 'Jarvis', speak a command, get a spoken answer.
+
+    stream=True (phase 12, `jarvis wake --stream`): the command capture runs
+    over the streaming provider layer - live HUD captions from partials,
+    kill-switch aware. Needs the Vosk backend (streaming partials).
+    """
+    from . import hud as hud_module
     from .voice import VoiceIO
 
     registry = tools.default_registry(
@@ -392,7 +400,10 @@ def _wake_session(cfg: config.Config, console: Console) -> None:
     )
     while True:
         try:
-            command = voice.listen_wake(phrase=cfg.voice.wake_phrase)
+            if stream:
+                command = _wake_stream_command(cfg, console, hud_module)
+            else:
+                command = voice.listen_wake(phrase=cfg.voice.wake_phrase)
         except KeyboardInterrupt:
             console.print("\n[dim]Standing down, Sir.[/]")
             return
@@ -404,9 +415,49 @@ def _wake_session(cfg: config.Config, console: Console) -> None:
         if reply is not None:
             console.print(Panel(Markdown(reply), title="J.A.R.V.I.S.", border_style="cyan"))
             try:
-                voice.speak(reply, barge_in=True)
+                from .voice_stream import speak_reply
+
+                speak_reply(cfg, reply, barge_in=True)
             except Exception as exc:
                 console.print(f"[dim](speech failed: {exc})[/]")
+
+
+def _wake_stream_command(cfg: config.Config, console: Console, hud_module) -> str:
+    """One wake-cycle over the streaming provider (phase 12). Hardware capture
+    only - unit tests cover the pure loop (voice_stream.wake_stream_loop)."""
+    import numpy as np
+    import sounddevice as sd
+
+    from . import voice_stream
+
+    provider, reason = voice_stream.make_stt_stream(
+        cfg, on_status=lambda status: console.print(f"  [dim]>> {status}[/]")
+    )
+    if provider is None:
+        raise RuntimeError(reason)
+    from .voice import SAMPLE_RATE
+
+    def chunks():
+        with sd.InputStream(
+            samplerate=SAMPLE_RATE, channels=1, dtype="int16",
+            blocksize=4000, device=cfg.voice.mic_device,
+        ):
+            while True:
+                frames, _overflow = sd.read(4000)
+                yield np.squeeze(frames).tobytes()
+
+    command = voice_stream.wake_stream_loop(
+        provider,
+        chunks(),
+        cfg.voice.wake_phrase,
+        on_partial=lambda partial: hud_module.HUD.set_caption(partial),
+        on_status=lambda status: console.print(f"  [dim]>> {status}[/]"),
+        should_stop=hud_module.should_stop,
+    )
+    if not command:
+        voice_last_error = getattr(provider, "last_error", "") or "nothing heard"
+        console.print(f"[yellow]{voice_last_error}[/]")
+    return command or None
 
 
 def _license_command(console: Console, args: list[str]) -> int:
@@ -535,7 +586,7 @@ def _dispatch(argv: list[str] | None = None) -> int:
         cfg = config.Config.load()
         if cfg is None:
             cfg = run_wizard(console)
-        _wake_session(cfg, console)
+        _wake_session(cfg, console, stream="--stream" in argv[1:])
         return 0
     if argv and argv[0] == "health":
         from . import health
