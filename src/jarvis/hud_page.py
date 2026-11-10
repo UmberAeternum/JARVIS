@@ -66,6 +66,15 @@ button:focus-visible{outline:2px solid var(--accent); outline-offset:2px}
   display:inline-block; visibility:hidden;
 }
 #micdot.on{visibility:visible; box-shadow:0 0 8px var(--accent)}
+#gstdot{
+  width:9px; height:9px; border-radius:50%; background:var(--ok);
+  display:inline-block; visibility:hidden;
+}
+#gstdot.on{visibility:visible; box-shadow:0 0 8px var(--ok)}
+#gstvideo{width:100%; max-width:240px; border-radius:8px; background:#000;
+  display:none; aspect-ratio:4/3}
+#gstfeed{font-size:12px; color:var(--dim); margin-top:4px; min-height:16px}
+#gstnote{font-size:12px; color:var(--dim)}
 main{
   display:grid; gap:10px; padding:10px 14px 52px; height:calc(100% - 53px);
   grid-template-columns:minmax(260px, 1.2fr) 2fr; grid-template-rows:auto 1fr;
@@ -127,6 +136,7 @@ section h2{
 <header>
   <h1>UMBRA</h1>
   <span id="micdot" title="microphone open - audio never leaves this page"></span>
+  <span id="gstdot" title="camera on - frames are processed in this page and never sent anywhere"></span>
   <span class="chip" id="chipTier">tier -</span>
   <span class="chip" id="chipGrants">grants -</span>
   <span class="chip" id="chipVer">v-</span>
@@ -161,6 +171,13 @@ section h2{
     <section aria-label="Devices panel">
       <h2>DEVICES</h2>
       <ul id="devices"><li class="none">no devices reported</li></ul>
+    </section>
+    <section aria-label="Hand gestures panel - opt-in, camera stays in this page">
+      <h2>GESTURES</h2>
+      <div id="gstnote">checking gesture status...</div>
+      <video id="gstvideo" autoplay playsinline muted aria-label="Local camera preview - never transmitted"></video>
+      <div id="gstfeed" aria-live="polite"></div>
+      <button id="btnGest" aria-label="Toggle hand-gesture control (requires camera, opt-in)">Enable hand control</button>
     </section>
   </div>
   <section id="log" aria-label="Live action log">
@@ -290,6 +307,128 @@ $("btnKill").addEventListener("click", function(){
     .then(function(){ applyState("alert", null); logLine({ts:"now", text:"KILL SWITCH engaged - halting all actions", kill:true}); })
     .catch(function(){ setCaptions("kill switch call failed - run jarvis stop"); });
 });
+
+// -------------------------------------------------- gestures (opt-in, local)
+var gstState = {status:null, hands:null, stream:null, lastSeen:0, sending:false};
+function gstNote(text){ $("gstnote").textContent = text; }
+function gstFeed(text){ $("gstfeed").textContent = text; }
+function gstCameraIndicator(on){
+  $("gstdot").classList.toggle("on", on);
+  $("gstvideo").style.display = on ? "block" : "none";
+}
+function gstStatus(){
+  api("/api/gestures").then(function(r){ return r.status === 200 ? r.json() : null; })
+    .then(function(s){
+      if (!s) return;
+      gstState.status = s;
+      var vendored = s.vendor && s.vendor.complete;
+      if (!s.enabled){
+        gstNote("off (opt-in) - run: jarvis gestures enable");
+        $("btnGest").disabled = true;
+      } else if (!s.grant.allowed){
+        gstNote("needs the assist grant - jarvis access grant --tiers assist");
+        $("btnGest").disabled = true;
+      } else if (!vendored){
+        gstNote("tracker bundle missing - run: jarvis gestures vendor");
+        $("btnGest").disabled = true;
+      } else {
+        gstNote("ready - point=cursor pinch=select swipe=nav palm=pause fist=KILL");
+        $("btnGest").disabled = false;
+      }
+    }).catch(function(){ gstNote("gesture status unavailable"); });
+}
+gstStatus();
+setInterval(gstStatus, 15000);
+$("btnGest").addEventListener("click", function(){
+  if (gstState.stream){ gstStop(); return; }
+  gstStart();
+});
+function gstStop(){
+  if (gstState.stream){ gstState.stream.getTracks().forEach(function(t){ t.stop(); }); }
+  gstState.stream = null;
+  gstCameraIndicator(false);
+  $("btnGest").textContent = "Enable hand control";
+  gstFeed("camera off");
+}
+function gstStart(){
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia){
+    gstNote("camera not available in this browser"); return;
+  }
+  navigator.mediaDevices.getUserMedia({video:{width:320, height:240}, audio:false})
+    .then(function(stream){
+      gstState.stream = stream;
+      $("gstvideo").srcObject = stream;
+      gstCameraIndicator(true);
+      $("btnGest").textContent = "Disable hand control";
+      gstFeed("camera on - local only");
+      gstState.lastSeen = Date.now();
+      return loadTracker();
+    })
+    .then(function(hands){
+      if (!hands){ gstNote("tracker failed to load"); gstStop(); return; }
+      gstState.hands = hands;
+      // idle timeout: no hand seen for idle_timeout_s -> camera auto-off
+      var timeoutMs = ((gstState.status && gstState.status.idle_timeout_s) || 30) * 1000;
+      var idleTimer = setInterval(function(){
+        if (!gstState.stream){ clearInterval(idleTimer); return; }
+        if (Date.now() - gstState.lastSeen > timeoutMs){
+          gstFeed("idle timeout - camera off"); gstStop(); clearInterval(idleTimer);
+        }
+      }, 1000);
+    })
+    .catch(function(){
+      gstNote("camera declined - gestures stay off (nothing was sent anywhere)");
+    });
+}
+function loadTracker(){
+  if (window.Hands) return Promise.resolve(new window.Hands({locateFile:function(f){ return "/vendor/" + f; }}));
+  return new Promise(function(resolve){
+    var s = document.createElement("script");
+    s.src = "/vendor/hands.js";  // local vendored file, never a CDN
+    s.onload = function(){
+      if (!window.Hands){ resolve(null); return; }
+      resolve(new window.Hands({locateFile:function(f){ return "/vendor/" + f; }}));
+    };
+    s.onerror = function(){ resolve(null); };
+    document.head.appendChild(s);
+  });
+}
+// The tracker calls this per frame with normalized landmarks; we forward
+// coordinates only (no frames) to the token-gated endpoint, throttled.
+function gstOnResults(results){
+  if (!results.multiHandLandmarks || !results.multiHandLandmarks.length){
+    return;  // idle timer handles the auto-off
+  }
+  gstState.lastSeen = Date.now();
+  if (gstState.sending) return;
+  gstState.sending = true;
+  var points = results.multiHandLandmarks[0].map(function(p){ return [p.x, p.y]; });
+  api("/api/gesture", {method:"POST", body:JSON.stringify({landmarks:points})})
+    .then(function(r){ return r.status === 200 ? r.json() : {error:r.status}; })
+    .then(function(res){
+      gstState.sending = false;
+      if (res && res.gesture && res.gesture !== "none"){
+        gstFeed("gesture: " + res.gesture + " -> " + (res.action || "-") +
+                (res.detail ? " (" + res.detail + ")" : ""));
+        if (res.gesture === "fist") applyState("alert", null);
+      }
+    }).catch(function(){ gstState.sending = false; });
+}
+// Wire the vendored tracker once it exists (poll; the script loads on start).
+(function gstPollTracker(){
+  if (gstState.hands && !gstState.hands.__wired){
+    gstState.hands.__wired = true;
+    gstState.hands.onResults(gstOnResults);
+    (function pump(){
+      if (!gstState.stream){ return; }
+      gstState.hands.send({image: $("gstvideo")})
+        .then(function(){ requestAnimationFrame(pump); })
+        .catch(function(){ setTimeout(pump, 300); });
+    })();
+  } else {
+    setTimeout(gstPollTracker, 500);
+  }
+})();
 
 // -------------------------------------------------------------- rendering
 function setCaptions(text){ $("captions").textContent = text; }

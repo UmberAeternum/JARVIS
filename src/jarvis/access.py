@@ -60,6 +60,7 @@ SCOPE_TIER = {
     "api.tools": "assist",
     "api.chat": "assist",
     "overlay.attach": "assist",
+    "hud.gesture": "assist",  # phase 13: hand-gesture landmark feed
     "inject.install": "install",
 }
 

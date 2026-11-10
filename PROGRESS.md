@@ -1,6 +1,6 @@
 # PROGRESS — Phases 11–20 autonomous run
 
-**Status: Phase 11 DONE (tag phase-11, pushed). Phase 12 DONE (tag phase-12). Current: phase-13 next.**
+**Status: Phase 11 DONE (tag phase-11, pushed). Phase 12 DONE (tag phase-12, pushed). Phase 13 DONE (tag phase-13). Current: phase-14 next.**
 
 ## Verify-first results (2026-11-10, final)
 
@@ -34,7 +34,9 @@ Toolchain: Python 3.12.10 (user scope, `%LOCALAPPDATA%\Programs\Python\Python312
 - phase-12 Voice upgrade — **DONE** (gates green; commit + tag phase-12)
   - files: src/jarvis/voice_stream.py (new), voice.py untouched, config.py (+6 voice provider keys), settings.py (+6 whitelist keys), cli.py (speak_reply at both speak sites, _wake_session --stream, _wake_stream_command), tests/test_smoke.py (+phase12_voice_upgrade, counts 33→34), tests/evals/scenarios/voice.json (new), tests/evals/baseline.json (regenerated), README.md, ROADMAP.md
   - gates: smoke 97/97 · eval 34/34 · compare no regressions · access verify OK
-- phase-13 Hand gestures — not started
+- phase-13 Hand gestures — **DONE** (gates green; commit + tag phase-13)
+  - files: src/jarvis/gestures.py (new), src/jarvis/hud.py (+/api/gestures, /api/gesture, /vendor/*), src/jarvis/hud_page.py (+gestures panel, camera indicator, vendored tracker loading, idle auto-off), src/jarvis/access.py (+"hud.gesture": assist), src/jarvis/config.py (+GesturesConfig), src/jarvis/settings.py (+3 keys), src/jarvis/cli.py (gestures status|vendor|enable|disable|calibrate), tests/test_smoke.py (+phase13_hand_gestures, counts 34→35), tests/evals/scenarios/gestures.json (new), tests/evals/baseline.json (regenerated), ATTRIBUTIONS.md (+MediaPipe), ROADMAP.md
+  - gates: smoke 98/98 · eval 35/35 · compare no regressions · access verify OK
 - phase-14 Browser/app control engine — not started
 - phase-15 Messaging/email assistant — not started
 - phase-16 Website builder — not started
@@ -57,3 +59,4 @@ Toolchain: Python 3.12.10 (user scope, `%LOCALAPPDATA%\Programs\Python\Python312
 
 - Phase 11: audio-reactive orb (browser WebAudio) is client-side and opt-in; no automated test can hear it — verified by code review + the no-external-requests test only. Unverified on real hardware.
 - Phase 12: the microphone InputStream loop in `_wake_stream_command` (cli.py) and real Vosk/Whisper/SAPI behavior are hardware paths — the provider abstraction, wake loop, gates, captions, and latency budget are tested with scripted providers and a fake clock. Unverified on real hardware until the user runs `jarvis wake --stream` with a mic.
+- Phase 13: the browser hand tracker (vendored MediaPipe Hands) and camera pipeline are hardware paths — classification, action mapping, grants, rate limiting, and the kill switch are tested with synthetic landmark streams. Unverified on real hardware until the user runs `jarvis gestures vendor && jarvis gestures enable` with a camera.

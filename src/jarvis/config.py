@@ -231,6 +231,17 @@ class AmbientConfig:
 
 
 @dataclass
+class GesturesConfig:
+    """Phase 13: hand gestures. Opt-in, HUD-only control; the camera runs in
+    the browser and never leaves the device. threshold scales the pinch
+    distance (calibration, `jarvis gestures calibrate`)."""
+
+    enabled: bool = False         # explicit toggle; default OFF
+    idle_timeout_s: int = 30      # camera auto-off after no hand is seen
+    threshold: float = 1.0        # pinch sensitivity multiplier
+
+
+@dataclass
 class Config:
     version: int = 4
     brains: BrainsConfig = field(default_factory=BrainsConfig)
@@ -242,6 +253,7 @@ class Config:
     updates: UpdatesConfig = field(default_factory=UpdatesConfig)
     diagnostics: DiagnosticsConfig = field(default_factory=DiagnosticsConfig)
     ambient: AmbientConfig = field(default_factory=AmbientConfig)
+    gestures: GesturesConfig = field(default_factory=GesturesConfig)
     hud: HudConfig = field(default_factory=HudConfig)
     access: AccessConfig = field(default_factory=AccessConfig)
     router: RouterConfig = field(default_factory=RouterConfig)
@@ -322,6 +334,11 @@ class Config:
                 "typed": self.hud.typed,
                 "boot": self.hud.boot,
                 "reduced_motion": self.hud.reduced_motion,
+            },
+            "gestures": {
+                "enabled": self.gestures.enabled,
+                "idle_timeout_s": self.gestures.idle_timeout_s,
+                "threshold": self.gestures.threshold,
             },
             "access": {
                 "window_hours": self.access.window_hours,
@@ -447,11 +464,17 @@ class Config:
             diagnostics=cls._diagnostics_from(raw.get("diagnostics")),
             ambient=cls._ambient_from(raw.get("ambient")),
             hud=cls._hud_from(raw.get("hud")),
+            gestures=cls._gestures_from(raw.get("gestures")),
             access=cls._access_from(raw.get("access")),
             router=cls._router_from(raw.get("router")),
             created_at=raw.get("created_at", ""),
             updated_at=raw.get("updated_at", ""),
         )
+
+    @classmethod
+    def _gestures_from(cls, raw: dict | None) -> GesturesConfig:
+        known = {f.name for f in fields(GesturesConfig)}
+        return GesturesConfig(**{k: v for k, v in (raw or {}).items() if k in known})
 
     @classmethod
     def _from_v1(cls, raw: dict) -> "Config":

@@ -35,6 +35,11 @@ authors under its own license.
 - Android SpeechRecognizer and TextToSpeech: provided by the platform vendor.
 - Vosk speech model (small-en-us): downloaded at first use from alphacephei.com
   under the Apache-2.0 license. The model runs entirely on the device.
+- MediaPipe Hands tracker (phase 13 gestures): vendored on the user's explicit
+  command (`jarvis gestures vendor`) from the @mediapipe/hands npm distribution
+  (jsdelivr), Apache-2.0 License, Copyright 2023 The MediaPipe Authors. The
+  bundle runs entirely inside the browser; camera frames never leave the device
+  and only normalized landmark coordinates reach the local HUD API.
 
 ## Trademarks
 

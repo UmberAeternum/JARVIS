@@ -297,6 +297,39 @@ def make_handler(store: HudState, cfg: config.Config) -> type:
                 last = events[-1]["id"] if events else since
                 self._json(200, {"events": events, "last": last})
                 return
+            if path == "/api/gestures":
+                # Phase 13 status: enabled state, calibration, vendor bundle,
+                # and the grant verdict (the page explains, never guesses).
+                from . import access as access_module
+                from . import gestures as gestures_module
+
+                allowed, reason = access_module.authorize("hud.gesture", actor="hud")
+                self._json(200, {
+                    "enabled": bool(cfg.gestures.enabled),
+                    "threshold": cfg.gestures.threshold,
+                    "idle_timeout_s": cfg.gestures.idle_timeout_s,
+                    "vendor": gestures_module.vendor_status(),
+                    "grant": {"allowed": allowed, "reason": reason},
+                })
+                return
+            if path.startswith("/vendor/"):
+                # The vendored tracker bundle, served locally only. The name
+                # is restricted to the fixed HANDS_FILES list - no traversal.
+                from . import gestures as gestures_module
+
+                name = path[len("/vendor/"):]
+                if name not in gestures_module.HANDS_FILES:
+                    self._send(404, b"not found", "text/plain")
+                    return
+                target = gestures_module.vendor_dir() / name
+                if not target.is_file():
+                    self._send(404, b"tracker bundle not installed - run: jarvis gestures vendor", "text/plain")
+                    return
+                ctype = ("application/wasm" if name.endswith(".wasm")
+                         else "application/javascript" if name.endswith(".js")
+                         else "application/octet-stream")
+                self._send(200, target.read_bytes(), ctype)
+                return
             self._json(404, {"error": "not found"})
 
         def do_POST(self) -> None:  # noqa: N802 - stdlib naming
@@ -317,6 +350,36 @@ def make_handler(store: HudState, cfg: config.Config) -> type:
                     pass  # body ignored; the flag does the work
                 request_stop("HUD button")
                 self._json(200, {"stopped": True, "should_stop": should_stop()})
+                return
+            if path == "/api/gesture":
+                # Phase 13: the landmark feed. Token + assist grant + explicit
+                # enable + rate limit. Landmarks are coordinates only; the
+                # camera never leaves the browser. Gestures drive HUD-only
+                # actions - fist is the kill switch, nothing can confirm.
+                from . import access as access_module
+                from . import gestures as gestures_module
+
+                if not cfg.gestures.enabled:
+                    self._json(403, {"error": "gestures are disabled - opt in with: jarvis gestures enable"})
+                    return
+                allowed, reason = access_module.authorize("hud.gesture", actor="hud")
+                if not allowed:
+                    self._json(403, {"error": reason})
+                    return
+                if not gestures_module.GESTURE_RATE.allow():
+                    self._json(429, {"error": "gesture feed rate limited"})
+                    return
+                try:
+                    payload = json.loads(raw.decode("utf-8"))
+                except (ValueError, UnicodeDecodeError):
+                    payload = {}
+                points = payload.get("landmarks") if isinstance(payload, dict) else None
+                result = gestures_module.GESTURE_SESSION.observe(points)
+                if result["gesture"] != "none":
+                    observe_status(
+                        f"gesture: {result['gesture']} -> {result['action'] or '(none)'}"
+                    )
+                self._json(200, result)
                 return
             self._json(404, {"error": "not found"})
 

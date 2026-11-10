@@ -564,6 +564,7 @@ def _dispatch(argv: list[str] | None = None) -> int:
             "  access      grant --full | grant --tiers observe,assist,act,install | status | verify | log | revoke --all (EDITH protocol)\n"
             "  voice       show | set <default|jarvis> - TTS voice profile\n"
             "  hud         show | theme <minimal|hud|scanline> | serve | token rotate - the Orb HUD\n"
+            "  gestures    status | vendor | enable | disable | calibrate <mult> - hand control (opt-in)\n"
             "  stop        the kill switch: halt all running actions (stop --clear to rearm)\n"
             "  intro       the 10-second boot sequence (--no-audio to skip speech)\n"
             "  api         token rotate | token show - the local API credential\n"
@@ -1114,6 +1115,51 @@ def _dispatch(argv: list[str] | None = None) -> int:
                           " (British-butler voice used when a matching SAPI voice exists)")
             return 0
         console.print("usage: jarvis voice show | set <default|jarvis>")
+        return 1
+    if argv and argv[0] == "gestures":
+        # Phase 13 - opt-in hand control for the HUD. The camera runs in the
+        # browser only; landmarks drive HUD-only actions; fist = kill switch.
+        from . import gestures as gestures_module
+
+        sub = argv[1] if len(argv) > 1 else "status"
+        current = config.Config.load() or config.Config()
+        if sub == "status":
+            vendor = gestures_module.vendor_status()
+            console.print(
+                f"enabled: {current.gestures.enabled} · threshold: {current.gestures.threshold} · "
+                f"idle timeout: {current.gestures.idle_timeout_s}s · "
+                f"tracker: {'installed' if vendor['complete'] else 'missing (jarvis gestures vendor)'}"
+            )
+            console.print("map: point=cursor · pinch=select · swipe=nav · open palm=pause · fist=KILL SWITCH")
+            console.print("[dim]gestures can never confirm money/send/publish/delete actions.[/]")
+            return 0
+        if sub == "vendor":
+            ok, reason = gestures_module.vendor_download(
+                lambda status: console.print(f"  [dim]>> {status}[/]")
+            )
+            if ok:
+                console.print("[green]Tracker bundle installed locally.[/] (MediaPipe Hands, Apache-2.0)")
+                return 0
+            console.print(f"[red]{reason}[/]")
+            return 1
+        if sub in ("enable", "disable"):
+            current.gestures.enabled = sub == "enable"
+            current.save()
+            console.print(f"[green]Hand gestures:[/] {current.gestures.enabled}")
+            return 0
+        if sub == "calibrate" and len(argv) > 2:
+            try:
+                value = float(argv[2])
+            except ValueError:
+                console.print("usage: jarvis gestures calibrate <0.2..5.0>")
+                return 1
+            value = max(0.2, min(5.0, value))
+            current.gestures.threshold = value
+            current.save()
+            gestures_module.GESTURE_SESSION.threshold = value
+            console.print(f"[green]Pinch threshold:[/] {value}")
+            return 0
+        console.print("usage: jarvis gestures status | vendor | enable | disable | calibrate <mult>")
         return 1
     if argv and argv[0] == "stop":
         # Phase 11 - the global kill switch (HIGH-CONSEQUENCE rules).

@@ -3340,6 +3340,152 @@ def phase12_voice_upgrade(tmp: Path) -> None:
         config.config_dir = original
 
 
+def phase13_hand_gestures(tmp: Path) -> None:
+    """Phase 13 - hand gestures: classification from synthetic landmark
+    streams, the action map, fist = kill switch, the never-confirm control,
+    rate limit, grant gate + revoke, vendor status. No camera, no network."""
+    import http.client
+
+    from jarvis import access as access_module
+    from jarvis import gestures as gestures_module
+    from jarvis import hud as hud_module
+    from jarvis.gestures import (CONFIRM_CLASSES, GestureSession, RateLimiter,
+                                 classify_landmarks, gesture_confirm)
+
+    original = config.config_dir
+    config.config_dir = lambda: tmp / "cfghud13"
+    try:
+        def hand(index=True, middle=True, ring=True, pinky=True, pinch=False):
+            pts = [[0.5, 0.9] for _ in range(21)]
+            for tip, pip, up in ((8, 6, index), (12, 10, middle), (16, 14, ring), (20, 18, pinky)):
+                pts[tip] = [0.5, 0.30 if up else 0.60]
+                pts[pip] = [0.5, 0.50]
+            pts[4] = [0.5, 0.32 if pinch else 0.90]
+            return pts
+
+        # classification: the five postures + partial frames
+        expect(classify_landmarks(hand()) == "open_palm", "open palm")
+        expect(classify_landmarks(hand(False, False, False, False)) == "fist", "fist")
+        expect(classify_landmarks(hand(True, False, False, False)) == "point", "point")
+        expect(classify_landmarks(hand(True, False, False, False, pinch=True)) == "pinch", "pinch")
+        expect(classify_landmarks(hand(True, True, False, False)) == "none", "partial posture")
+        expect(classify_landmarks([[0.5, 0.5]] * 5) == "none", "too few landmarks")
+        expect(classify_landmarks(hand(), threshold=5.0) == "open_palm", "threshold keeps palm")
+
+        # the never-confirm control: every class, plus junk, refuses
+        for cls in CONFIRM_CLASSES + ("anything", "confirm", "approve"):
+            expect(gesture_confirm(cls) is False, f"gesture must never confirm {cls}")
+        for action in gestures_module.ACTION_MAP.values():
+            expect(action not in ("confirm", "approve", "allow", "authorize"),
+                   f"action map must never contain a confirmation verb: {action}")
+
+        # session: fist is the kill switch; palm pauses; pinch/point HUD-only
+        hud_module.clear_stop()
+        session = GestureSession()
+        result = session.observe(hand(False, False, False, False))
+        expect(result["gesture"] == "fist" and result["action"] == "kill", f"fist: {result}")
+        expect(hud_module.should_stop() is True, "fist must engage the kill switch")
+        hud_module.clear_stop()
+        expect(session.observe(hand())["action"] == "pause", "open palm pauses")
+        expect(session.observe(hand(True, False, False, False, pinch=True))["action"] == "select",
+               "pinch selects (HUD only)")
+        expect(session.observe(hand(True, False, False, False))["action"] == "cursor",
+               "point is cursor (HUD only)")
+
+        # swipe: wrist travel left across the window
+        swipe = GestureSession()
+        for x in (0.50, 0.48, 0.44, 0.40):
+            swipe.observe([[x, 0.9]] + hand()[1:])
+        result = swipe.observe([[0.12, 0.9]] + hand()[1:])
+        expect(result["gesture"] == "swipe_left", f"swipe: {result}")
+
+        # idle staleness (camera auto-off semantics)
+        fresh = GestureSession()
+        expect(fresh.is_stale(now=100.0) is True, "no frames = stale")
+        fresh.observe(hand(), now=100.0)
+        expect(fresh.is_stale(now=110.0) is False, "recent frame = fresh")
+        expect(fresh.is_stale(now=200.0) is True, "old frame = stale")
+
+        # rate limiter: 3/s window, then refused
+        limiter = RateLimiter(max_per_second=3)
+        allowed_count = sum(1 for i in range(6) if limiter.allow(now=float(i) * 0.01))
+        expect(allowed_count == 3, f"rate limit: {allowed_count}")
+
+        # vendor status: no network touched, absent by default
+        vendor = gestures_module.vendor_status()
+        expect(vendor["complete"] is False, "vendor bundle starts absent")
+    finally:
+        config.config_dir = original
+
+    # HTTP: the gesture feed is token-gated, grant-gated, enable-gated
+    config.config_dir = lambda: tmp / "cfghud13b"
+    try:
+        token = hud_module.ensure_token()
+        cfg = config.Config()
+        cfg.gestures.enabled = True
+        server, port, thread = hud_module.start_server(hud_module.HUD, cfg, preferred_port=0)
+        conn = http.client.HTTPConnection("127.0.0.1", port, timeout=10)
+
+        def fist_body():
+            # curled hand: every fingertip BELOW its PIP joint (y grows down)
+            pts = [[0.5, 0.9] for _ in range(21)]
+            for tip, pip in ((8, 6), (12, 10), (16, 14), (20, 18)):
+                pts[tip] = [0.5, 0.60]
+                pts[pip] = [0.5, 0.50]
+            return json.dumps({"landmarks": pts}).encode()
+
+        try:
+            conn.request("POST", "/api/gesture", body=fist_body(),
+                         headers={"Content-Type": "application/json"})
+            resp = conn.getresponse()
+            expect(resp.status == 403, f"gesture without token: {resp.status}")
+            resp.read()
+            conn.request("POST", f"/api/gesture?t={token}", body=fist_body(),
+                         headers={"Content-Type": "application/json"})
+            resp = conn.getresponse()
+            expect(resp.status == 403, f"gesture without grant: {resp.status}")
+            resp.read()
+            conn.request("GET", f"/api/gestures?t={token}")
+            resp = conn.getresponse()
+            status = json.loads(resp.read().decode("utf-8"))
+            expect(resp.status == 200 and status["enabled"] is True
+                   and status["grant"]["allowed"] is False,
+                   f"gestures status: {status}")
+            # grant the assist tier with the typed phrase, then the feed works
+            ok, why = access_module.grant_tiers(["assist"], "I grant UMBRA full access")
+            expect(ok, f"assist grant: {why}")
+            hud_module.clear_stop()
+            gestures_module.GESTURE_RATE = gestures_module.RateLimiter(max_per_second=1000)
+            conn.request("POST", f"/api/gesture?t={token}", body=fist_body(),
+                         headers={"Content-Type": "application/json"})
+            resp = conn.getresponse()
+            result = json.loads(resp.read().decode("utf-8"))
+            expect(resp.status == 200 and result["gesture"] == "fist" and result["action"] == "kill",
+                   f"gesture feed: {result}")
+            expect(hud_module.should_stop() is True, "fist over HTTP engages the kill switch")
+            # revoke -> gesture control gone instantly (camera-side too)
+            access_module.revoke_all()
+            conn.request("POST", f"/api/gesture?t={token}", body=fist_body(),
+                         headers={"Content-Type": "application/json"})
+            resp = conn.getresponse()
+            expect(resp.status == 403, f"gesture after revoke: {resp.status}")
+            resp.read()
+            # vendor endpoint traversal must never resolve (auth first, then
+            # the fixed-file allowlist)
+            conn.request("GET", f"/vendor/../hud-token?t={token}")
+            resp = conn.getresponse()
+            expect(resp.status == 404, f"vendor traversal: {resp.status}")
+            resp.read()
+        finally:
+            conn.close()
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=5)
+            hud_module.clear_stop()  # the fist latch must not leak into later checks
+    finally:
+        config.config_dir = original
+
+
 def phase11_orb_hud(tmp: Path) -> None:
     """Phase 11 - the Orb HUD: state colors, token auth, themes, reduced
     motion, no external requests, the kill switch, and the agent halt."""
@@ -3989,17 +4135,17 @@ def eval_baseline(tmp: Path) -> None:
 
     scenarios_dir = Path(__file__).resolve().parent / "evals" / "scenarios"
     scenarios = load_scenarios(scenarios_dir)
-    expect(len(scenarios) == 34, f"expected 34 scenarios, got {len(scenarios)}")
+    expect(len(scenarios) == 35, f"expected 35 scenarios, got {len(scenarios)}")
     categories = {s.get("category") for s in scenarios}
     expect(categories == {"tool_calling", "gate_enforcement", "destructive",
                           "memory", "prompt_injection", "persona", "routing", "hud",
-                          "voice"},
+                          "voice", "gestures"},
            f"category coverage: {categories}")
 
     # offline run: every scenario executes in an isolated config dir
     with tempfile.TemporaryDirectory() as td:
         results = run_scenarios(scenarios, Path(td))
-    expect(results["total"] == 34, f"total: {results['total']}")
+    expect(results["total"] == 35, f"total: {results['total']}")
 
     # known failures are recorded honestly with reasons
     known = [r for r in results["results"] if not r["passed"] and r["known_failure"]]
@@ -4037,7 +4183,7 @@ def eval_baseline(tmp: Path) -> None:
 
     write_baseline(baseline_path, results)
     loaded = json.loads(baseline_path.read_text(encoding="utf-8"))
-    expect(len(loaded.get("results", [])) == 34, "baseline file incomplete")
+    expect(len(loaded.get("results", [])) == 35, "baseline file incomplete")
     report2 = compare_results(loaded, loaded)
     expect(not report2["regressions"], "self-compare must have no regressions")
 
@@ -4956,6 +5102,8 @@ def main() -> int:
           lambda: phase11_orb_hud(tmp_path))
     check("phase 12: streaming voice (gates, partials, budget, wake, captions)",
           lambda: phase12_voice_upgrade(tmp_path))
+    check("phase 13: hand gestures (classification, fist=kill, never-confirm, grants)",
+          lambda: phase13_hand_gestures(tmp_path))
     check("EDITH protocol", lambda: edith_protocol(tmp_path))
     check("policy spine: authorize", lambda: spine_authorize(tmp_path))
     check("GA hardening", lambda: ga_hardening(tmp_path))
